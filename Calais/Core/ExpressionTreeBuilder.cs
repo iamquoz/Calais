@@ -16,11 +16,9 @@ namespace Calais.Core
     /// <summary>
     /// Builds expression trees for filtering and sorting based on CalaisQuery
     /// </summary>
-    public class ExpressionTreeBuilder
+    public class ExpressionTreeBuilder(CalaisOptions options)
     {
-        private readonly CalaisOptions _options;
-
-        private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;
+	    private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;
         private static readonly MethodInfo StringStartsWithMethod = typeof(string).GetMethod(nameof(string.StartsWith), new[] { typeof(string) })!;
         private static readonly MethodInfo StringEndsWithMethod = typeof(string).GetMethod(nameof(string.EndsWith), new[] { typeof(string) })!;
         private static readonly MethodInfo StringToLowerMethod = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
@@ -28,51 +26,67 @@ namespace Calais.Core
             .First(m => m.Name == nameof(Enumerable.Count) && m.GetParameters().Length == 1);
         private static readonly MethodInfo EnumerableAnyMethod = typeof(Enumerable).GetMethods()
             .First(m => m.Name == nameof(Enumerable.Any) && m.GetParameters().Length == 2);
-        
-        // NpgsqlTsVector.Matches(NpgsqlTsQuery) instance method
-        private static readonly MethodInfo TsVectorMatchesMethod = typeof(NpgsqlTsVector)
-            .GetMethod("Matches", new[] { typeof(NpgsqlTsQuery) })!;
-        
-        // EF.Functions.ToTsQuery(string config, string query) - found via NpgsqlDbFunctionsExtensions
+
+        // NpgsqlFullTextSearchLinqExtensions.Matches(NpgsqlTsVector, NpgsqlTsQuery) extension method
+        private static readonly MethodInfo TsVectorMatchesMethod = GetTsVectorMatchesMethod();
+
+        // NpgsqlFullTextSearchDbFunctionsExtensions.ToTsQuery(DbFunctions, string config, string query)
         private static readonly MethodInfo ToTsQueryMethod = GetToTsQueryMethod();
 
-        private static MethodInfo GetToTsQueryMethod()
+        private static MethodInfo GetTsVectorMatchesMethod()
         {
-            // Find NpgsqlDbFunctionsExtensions.ToTsQuery(DbFunctions, string, string)
-            var npgsqlExtType = Type.GetType("Npgsql.EntityFrameworkCore.PostgreSQL.NpgsqlDbFunctionsExtensions, Npgsql.EntityFrameworkCore.PostgreSQL");
-            if (npgsqlExtType != null)
+            try
             {
-                var method = npgsqlExtType.GetMethod("ToTsQuery", new[] { typeof(DbFunctions), typeof(string), typeof(string) });
-                if (method != null)
-                    return method;
-            }
-            
-            // Fallback: search in loaded assemblies
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
+                var assembly = Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL");
+                var extensionType = assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "NpgsqlFullTextSearchLinqExtensions");
+
+                if (extensionType != null)
                 {
-                    var type = assembly.GetTypes()
-                        .FirstOrDefault(t => t.Name == "NpgsqlDbFunctionsExtensions");
-                    if (type != null)
-                    {
-                        var method = type.GetMethod("ToTsQuery", new[] { typeof(DbFunctions), typeof(string), typeof(string) });
-                        if (method != null)
-                            return method;
-                    }
-                }
-                catch
-                {
-                    // Ignore assembly loading errors
+                    // Matches(NpgsqlTsVector, NpgsqlTsQuery)
+                    var method = extensionType.GetMethod("Matches", 
+                        BindingFlags.Public | BindingFlags.Static,
+                        null,
+                        [typeof(NpgsqlTsVector), typeof(NpgsqlTsQuery)],
+                        null);
+                    if (method != null)
+                        return method;
                 }
             }
-            
+            catch
+            {
+                // Ignore assembly loading errors
+            }
+
             return null!;
         }
 
-        public ExpressionTreeBuilder(CalaisOptions options)
+        private static MethodInfo GetToTsQueryMethod()
         {
-            _options = options;
+            try
+            {
+                var assembly = Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL");
+                var extensionType = assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "NpgsqlFullTextSearchDbFunctionsExtensions");
+
+                if (extensionType != null)
+                {
+                    // ToTsQuery(DbFunctions, string, string)
+                    var method = extensionType.GetMethod("ToTsQuery", 
+                        BindingFlags.Public | BindingFlags.Static,
+                        null,
+                        [typeof(DbFunctions), typeof(string), typeof(string)],
+                        null);
+                    if (method != null)
+                        return method;
+                }
+            }
+            catch
+            {
+                // Ignore assembly loading errors
+            }
+
+            return null!;
         }
 
         /// <summary>
@@ -85,7 +99,7 @@ namespace Calais.Core
                 return null;
 
             var parameter = Expression.Parameter(typeof(TEntity), "x");
-            var entityConfig = _options.GetEntityConfiguration<TEntity>();
+            var entityConfig = options.GetEntityConfiguration<TEntity>();
 
             Expression? combinedExpression = null;
 
@@ -148,9 +162,9 @@ namespace Calais.Core
                 entityConfig.Properties.TryGetValue(filter.Field!, out var propConfig) && 
                 !propConfig.IsFilterable)
             {
-                if (_options.ThrowOnInvalidFields)
-                    throw new PropertyNotFilterableException(filter.Field!);
-                return null;
+	            return options.ThrowOnInvalidFields 
+		            ? throw new PropertyNotFilterableException(filter.Field!) 
+		            : null;
             }
 
             // Check for custom filter
@@ -190,9 +204,9 @@ namespace Calais.Core
             var property = GetPropertyExpression(typeof(TEntity), filter.Field!, parameter);
             if (property == null)
             {
-                if (_options.ThrowOnInvalidFields)
-                    throw new PropertyNotFoundException(filter.Field!, typeof(TEntity));
-                return null;
+	            return options.ThrowOnInvalidFields 
+		            ? throw new PropertyNotFoundException(filter.Field!, typeof(TEntity)) 
+		            : null;
             }
 
             if (filter.Values == null || filter.Values.Count == 0)
@@ -200,7 +214,7 @@ namespace Calais.Core
 
             // For != operator with multiple values, use AND (must not match any)
             // For other operators with multiple values, use OR (must match at least one)
-            var useAnd = filter.Operator == "!=" || filter.Operator == "!=*";
+            var useAnd = filter.Operator is "!=" or "!=*";
             
             Expression? valueExpression = null;
             foreach (var value in filter.Values)
@@ -240,9 +254,9 @@ namespace Calais.Core
                 var propInfo = currentType.GetProperty(parts[i], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
                 if (propInfo == null)
                 {
-                    if (_options.ThrowOnInvalidFields)
-                        throw new PropertyNotFoundException(parts[i], currentType);
-                    return null;
+	                return options.ThrowOnInvalidFields 
+		                ? throw new PropertyNotFoundException(parts[i], currentType) 
+		                : null;
                 }
 
                 currentExpr = Expression.Property(currentExpr, propInfo);
@@ -287,7 +301,7 @@ namespace Calais.Core
             var finalProp = currentType.GetProperty(parts[^1], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (finalProp == null)
             {
-                if (_options.ThrowOnInvalidFields)
+                if (options.ThrowOnInvalidFields)
                     throw new PropertyNotFoundException(parts[^1], currentType);
                 return null;
             }
@@ -369,7 +383,7 @@ namespace Calais.Core
             var property = GetPropertyExpression(typeof(TEntity), filter.Field!, parameter);
             if (property == null)
             {
-                if (_options.ThrowOnInvalidFields)
+                if (options.ThrowOnInvalidFields)
                     throw new PropertyNotFoundException(filter.Field!, typeof(TEntity));
                 return null;
             }
@@ -388,7 +402,7 @@ namespace Calais.Core
             if (TsVectorMatchesMethod == null || ToTsQueryMethod == null)
                 return null;
 
-            var language = _options.DefaultVectorLanguage;
+            var language = options.DefaultVectorLanguage;
             
             // EF.Functions property access
             var efFunctionsProperty = typeof(EF).GetProperty(nameof(EF.Functions), BindingFlags.Public | BindingFlags.Static)!;
@@ -408,9 +422,10 @@ namespace Calais.Core
                     Expression.Constant(language),
                     Expression.Constant(tsQueryValue));
 
-                // Create: vectorProperty.Matches(toTsQueryExpr)
-                var matchExpr = Expression.Call(vectorProperty, TsVectorMatchesMethod, toTsQueryExpr);
-                
+                // Create: NpgsqlFullTextSearchLinqExtensions.Matches(vectorProperty, toTsQueryExpr)
+                // Since Matches is a static extension method, we use Expression.Call with the static method
+                var matchExpr = Expression.Call(TsVectorMatchesMethod, vectorProperty, toTsQueryExpr);
+
                 orExpr = orExpr == null ? (Expression)matchExpr : Expression.OrElse(orExpr, matchExpr);
             }
 
@@ -424,7 +439,7 @@ namespace Calais.Core
             var parts = filter.Field!.Split('.');
             if (parts.Length < 2)
             {
-                if (_options.ThrowOnInvalidFields)
+                if (options.ThrowOnInvalidFields)
                     throw new InvalidJsonPathException(filter.Field!);
                 return null;
             }
@@ -433,7 +448,7 @@ namespace Calais.Core
             var jsonProp = typeof(TEntity).GetProperty(parts[0], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (jsonProp == null)
             {
-                if (_options.ThrowOnInvalidFields)
+                if (options.ThrowOnInvalidFields)
                     throw new PropertyNotFoundException(parts[0], typeof(TEntity));
                 return null;
             }
@@ -469,7 +484,7 @@ namespace Calais.Core
             var propInfo = typeof(TEntity).GetProperty(filter.Field!, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             if (propInfo == null)
             {
-                if (_options.ThrowOnInvalidFields)
+                if (options.ThrowOnInvalidFields)
                     throw new PropertyNotFoundException(filter.Field!, typeof(TEntity));
                 return null;
             }
@@ -564,7 +579,7 @@ namespace Calais.Core
             };
         }
 
-        private Expression BuildStringMethodCall(Expression property, Expression value, MethodInfo method, bool negate)
+        private static Expression BuildStringMethodCall(Expression property, Expression value, MethodInfo method, bool negate)
         {
             var call = Expression.Call(property, method, value);
             if (negate)
@@ -639,20 +654,12 @@ namespace Calais.Core
             return replacer.Visit(expression.Body);
         }
 
-        private class ParameterReplacer : ExpressionVisitor
+        private class ParameterReplacer(ParameterExpression oldParameter, ParameterExpression newParameter)
+	        : ExpressionVisitor
         {
-            private readonly ParameterExpression _oldParameter;
-            private readonly ParameterExpression _newParameter;
-
-            public ParameterReplacer(ParameterExpression oldParameter, ParameterExpression newParameter)
+	        protected override Expression VisitParameter(ParameterExpression node)
             {
-                _oldParameter = oldParameter;
-                _newParameter = newParameter;
-            }
-
-            protected override Expression VisitParameter(ParameterExpression node)
-            {
-                return node == _oldParameter ? _newParameter : base.VisitParameter(node);
+                return node == oldParameter ? newParameter : base.VisitParameter(node);
             }
         }
     }

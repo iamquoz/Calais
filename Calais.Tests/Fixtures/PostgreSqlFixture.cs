@@ -21,13 +21,13 @@ namespace Calais.Tests.Fixtures
                 .Build();
         }
 
-        public async Task InitializeAsync()
+        public async ValueTask InitializeAsync()
         {
             await _container.StartAsync();
             await SeedDatabase();
         }
 
-        public async Task DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             await _container.StopAsync();
             await _container.DisposeAsync();
