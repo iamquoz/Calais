@@ -572,6 +572,15 @@ namespace Calais.Core
                 right = Expression.Call(valueExpr, StringToLowerMethod);
             }
 
+            // For enum types with comparison operators, convert to underlying type
+            var propertyType = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
+            if (propertyType.IsEnum && baseOp is ">" or "<" or ">=" or "<=")
+            {
+                var underlyingType = Enum.GetUnderlyingType(propertyType);
+                left = Expression.Convert(property, underlyingType);
+                right = Expression.Constant(Convert.ChangeType(convertedValue, underlyingType), underlyingType);
+            }
+
             return baseOp switch
             {
                 "==" => Expression.Equal(left, right),

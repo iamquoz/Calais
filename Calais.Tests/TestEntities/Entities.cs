@@ -6,6 +6,14 @@ using NpgsqlTypes;
 
 namespace Calais.Tests.TestEntities
 {
+    public enum UserStatus
+    {
+        Pending = 0,
+        Active = 1,
+        Suspended = 2,
+        Banned = 3
+    }
+
     public class User
     {
         public Guid Id { get; set; }
@@ -16,6 +24,7 @@ namespace Calais.Tests.TestEntities
         public DateTimeOffset? LockoutEnd { get; set; }
         public JsonDocument? JsonbColumn { get; set; }
         public string[] Tags { get; set; } = [];
+        public UserStatus Status { get; set; } = UserStatus.Pending;
         public List<Post> Posts { get; set; } = [];
         public List<Comment> Comments { get; set; } = [];
     }
