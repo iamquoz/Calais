@@ -677,9 +677,17 @@ namespace Calais.Core
                 return DateTimeOffset.Parse(dtoStr);
             }
 
-            if (underlyingType.IsEnum && value is string enumStr)
+            if (underlyingType.IsEnum)
             {
-                return Enum.Parse(underlyingType, enumStr, true);
+                if (value is string enumStr)
+                {
+                    return Enum.Parse(underlyingType, enumStr, true);
+                }
+                // Handle integer values for enums
+                if (value is int or long or short or byte or sbyte or uint or ulong or ushort)
+                {
+                    return Enum.ToObject(underlyingType, value);
+                }
             }
 
             return Convert.ChangeType(value, underlyingType);
@@ -687,6 +695,17 @@ namespace Calais.Core
 
         private static object? ConvertJsonElement(JsonElement element, Type targetType)
         {
+            // Handle enums from JSON - can be string name or integer value
+            if (targetType.IsEnum)
+            {
+                return element.ValueKind switch
+                {
+                    JsonValueKind.String => Enum.Parse(targetType, element.GetString()!, true),
+                    JsonValueKind.Number => Enum.ToObject(targetType, element.GetInt32()),
+                    _ => element.GetRawText()
+                };
+            }
+
             return element.ValueKind switch
             {
                 JsonValueKind.String when targetType == typeof(string) => element.GetString(),

@@ -233,5 +233,86 @@ namespace Calais.Tests
             result.Should().HaveCount(3);
             result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie", "diana");
         }
+
+        [Fact]
+        public async Task Filter_Enum_Equals_ByIntValue_ReturnsMatchingRecords()
+        {
+            await using var context = _fixture.CreateContext();
+
+            // Active = 1
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "status",
+                        Operator = "==",
+                        Values = [1]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            result.Should().HaveCount(2);
+            result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie");
+            result.Should().AllSatisfy(u => u.Status.Should().Be(UserStatus.Active));
+        }
+
+        [Fact]
+        public async Task Filter_Enum_GreaterThan_ByIntValue_ReturnsMatchingRecords()
+        {
+            await using var context = _fixture.CreateContext();
+
+            // Pending=0, Active=1, Suspended=2, Banned=3
+            // Greater than 1 (Active) means Suspended (2) and Banned (3)
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "status",
+                        Operator = ">",
+                        Values = [1]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            result.Should().HaveCount(2);
+            result.Select(u => u.Name).Should().BeEquivalentTo("bob", "eve");
+            result.Should().AllSatisfy(u => u.Status.Should().BeOneOf(UserStatus.Suspended, UserStatus.Banned));
+        }
+
+        [Fact]
+        public async Task Filter_Enum_MultipleValues_MixedIntAndString_TreatsAsOr()
+        {
+            await using var context = _fixture.CreateContext();
+
+            // Mix of integer (0 = Pending) and string ("Active")
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "status",
+                        Operator = "==",
+                        Values = [0, "Active"]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync(TestContext.Current.CancellationToken);
+
+            result.Should().HaveCount(3);
+            result.Should().AllSatisfy(u => u.Status.Should().BeOneOf(UserStatus.Pending, UserStatus.Active));
+        }
     }
 }
