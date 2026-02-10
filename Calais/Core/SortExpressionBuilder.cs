@@ -179,7 +179,7 @@ namespace Calais.Core
             return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
         }
 
-        private IOrderedQueryable<TEntity>? ApplyCustomSort<TEntity>(
+        private static IOrderedQueryable<TEntity>? ApplyCustomSort<TEntity>(
             IOrderedQueryable<TEntity>? orderedQuery,
             IQueryable<TEntity>? query,
             LambdaExpression customSort,
@@ -189,7 +189,7 @@ namespace Calais.Core
             return ApplyOrderBy(orderedQuery, query, customSort, direction, isFirst);
         }
 
-        private IOrderedQueryable<TEntity>? ApplyOrderBy<TEntity>(
+        private static IOrderedQueryable<TEntity>? ApplyOrderBy<TEntity>(
             IOrderedQueryable<TEntity>? orderedQuery,
             IQueryable<TEntity>? query,
             LambdaExpression keySelector,
@@ -205,7 +205,7 @@ namespace Calais.Core
                 .First(m => m.Name == methodName && m.GetParameters().Length == 2)
                 .MakeGenericMethod(typeof(TEntity), keySelector.ReturnType);
 
-            return (IOrderedQueryable<TEntity>)method.Invoke(null, new object[] { sourceQuery, keySelector })!;
+            return (IOrderedQueryable<TEntity>)method.Invoke(null, [sourceQuery, keySelector])!;
         }
     }
 }

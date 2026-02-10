@@ -43,7 +43,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Comments), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Users with at least 1 comment
             result.Should().HaveCountGreaterThan(0);
@@ -70,7 +70,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Posts), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.All(u => u.Posts.Count == 1).Should().BeTrue();
         }
@@ -95,7 +95,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Comments), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.All(u => u.Comments.Count > 0).Should().BeTrue();
         }

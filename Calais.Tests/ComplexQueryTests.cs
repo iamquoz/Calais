@@ -119,7 +119,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // age >= 25 AND (name contains 'li' OR age >= 35)
             // alice(25, contains li), charlie(35, contains li AND age >= 35), eve(40, age >= 35)

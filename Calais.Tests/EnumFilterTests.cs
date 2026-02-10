@@ -42,7 +42,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie");
@@ -68,7 +68,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Should().AllSatisfy(u => u.Status.Should().Be(UserStatus.Active));
@@ -93,7 +93,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3);
             result.Should().AllSatisfy(u => u.Status.Should().NotBe(UserStatus.Active));
@@ -118,7 +118,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3);
             result.Should().AllSatisfy(u => u.Status.Should().BeOneOf(UserStatus.Active, UserStatus.Pending));
@@ -145,7 +145,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Select(u => u.Name).Should().BeEquivalentTo("bob", "eve");
@@ -173,7 +173,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(1);
             result[0].Name.Should().Be("diana");
@@ -201,7 +201,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Select(u => u.Name).Should().BeEquivalentTo("bob", "eve");
@@ -228,7 +228,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3);
             result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie", "diana");

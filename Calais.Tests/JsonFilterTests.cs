@@ -43,7 +43,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // alice and charlie have "tagged" in randomData
             result.Should().HaveCount(2);
@@ -70,7 +70,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(1);
             result[0].Name.Should().Be("bob");
@@ -98,7 +98,7 @@ namespace Calais.Tests
             // Note: Users without jsonbColumn will have null values
             var result = await _processor.ApplySorting(
                 context.Users.Where(u => u.JsonbColumn != null), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3);
         }

@@ -151,7 +151,7 @@ namespace Calais.Tests
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Comments),
                 query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Users who have at least one comment containing "good"
             result.Should().HaveCountGreaterThan(0);
@@ -185,13 +185,13 @@ namespace Calais.Tests
             totalCount.Should().Be(4); // alice(25), bob(30), charlie(35), eve(40)
 
             // Now paginate page 1
-            var page1 = await _processor.ApplyPagination(filteredQuery, 1, 2).ToListAsync();
+            var page1 = await _processor.ApplyPagination(filteredQuery, 1, 2).ToListAsync(TestContext.Current.CancellationToken);
             page1.Should().HaveCount(2);
             page1[0].Name.Should().Be("alice");
             page1[1].Name.Should().Be("bob");
 
             // Now paginate page 2
-            var page2 = await _processor.ApplyPagination(filteredQuery, 2, 2).ToListAsync();
+            var page2 = await _processor.ApplyPagination(filteredQuery, 2, 2).ToListAsync(TestContext.Current.CancellationToken);
             page2.Should().HaveCount(2);
             page2[0].Name.Should().Be("charlie");
             page2[1].Name.Should().Be("eve");
@@ -220,7 +220,7 @@ namespace Calais.Tests
             var result = await _processor.Apply(
                 context.Users.Where(u => u.JsonbColumn != null),
                 query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Select(u => u.Name).Should().BeEquivalentTo(new[] { "alice", "charlie" });
@@ -241,7 +241,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplySorting(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Bob is banned (LockoutEnd != null), should be first
             result.First().Name.Should().Be("bob");
@@ -267,7 +267,7 @@ namespace Calais.Tests
 
             // Should return all users because passwordHash filter is ignored
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(5);
         }
@@ -293,7 +293,7 @@ namespace Calais.Tests
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Posts),
                 query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // alice, bob, charlie each have 1 post
             result.Should().HaveCount(3);

@@ -15,8 +15,7 @@ namespace Calais.Tests.Fixtures
 
         public PostgreSqlFixture()
         {
-            _container = new PostgreSqlBuilder()
-                .WithImage("postgres:15-alpine")
+            _container = new PostgreSqlBuilder("postgres:15-alpine")
                 .WithCleanUp(true)
                 .Build();
         }

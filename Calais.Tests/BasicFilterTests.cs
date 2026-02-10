@@ -44,7 +44,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(1);
             result[0].Name.Should().Be("alice");
@@ -69,7 +69,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result.Select(u => u.Name).Should().BeEquivalentTo("alice", "bob");
@@ -98,7 +98,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3);
             result.Select(u => u.Name).Should().NotContain(["alice", "bob"]);
@@ -130,7 +130,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(4);
             result.All(u => u.Age >= 20 && u.Age <= 35).Should().BeTrue();
@@ -155,7 +155,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2); // alice and charlie
             result.All(u => u.Name.Contains("li")).Should().BeTrue();
@@ -180,7 +180,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(1);
             result[0].Name.Should().Be("alice");
@@ -205,7 +205,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(1);
             result[0].Name.Should().Be("alice");
@@ -231,7 +231,7 @@ namespace Calais.Tests
 
             // With default options (ThrowOnInvalidFields = false), ignored field is silently skipped
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should return all users since the filter is ignored
             result.Should().HaveCount(5);
@@ -256,7 +256,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2); // alice and charlie have "admin" tag
             result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie");
@@ -281,7 +281,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // alice (admin), bob (tester), charlie (admin), diana (tester)
             result.Should().HaveCount(4);
@@ -307,7 +307,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // charlie (admin, manager), diana (tester), eve (empty)
             result.Should().HaveCount(3);
@@ -333,7 +333,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().BeEmpty();
         }
@@ -363,7 +363,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Only bob is a developer AND age >= 30
             result.Should().HaveCount(1);

@@ -43,7 +43,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Comments), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Users who have at least one comment containing "good"
             result.Should().HaveCountGreaterThan(0);
@@ -70,7 +70,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Posts), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCountGreaterThan(0);
             result.All(u => u.Posts.Any(p => p.Title.Contains("abc"))).Should().BeTrue();

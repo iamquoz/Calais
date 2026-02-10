@@ -55,7 +55,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // alice (name match) or eve (age > 35)
             result.Should().HaveCount(2);
@@ -101,7 +101,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // age >= 25 AND (name == alice OR name == charlie)
             result.Should().HaveCount(2);

@@ -39,7 +39,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.Apply(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result[0].Name.Should().Be("alice");
@@ -59,7 +59,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.Apply(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(2);
             result[0].Name.Should().Be("charlie");
@@ -90,7 +90,7 @@ namespace Calais.Tests
 
             // Apply pagination separately
             var pagedResult = await _processor.ApplyPagination(filteredQuery, 1, 2)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             totalCount.Should().Be(4); // alice(25), bob(30), charlie(35), eve(40)
             pagedResult.Should().HaveCount(2);
@@ -135,7 +135,7 @@ namespace Calais.Tests
             };
 
             var result = await processor.Apply(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().HaveCount(3); // Limited to MaxPageSize
         }

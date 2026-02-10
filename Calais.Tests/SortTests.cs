@@ -37,7 +37,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplySorting(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().BeInAscendingOrder(u => u.Name);
         }
@@ -53,7 +53,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplySorting(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().BeInDescendingOrder(u => u.Age);
         }
@@ -73,7 +73,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplySorting(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Primary sort by age ascending
             var ages = result.Select(u => u.Age).ToList();
@@ -91,7 +91,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplySorting(context.Users, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Banned users (LockoutEnd != null) should come first when desc
             result.Should().HaveCount(5);

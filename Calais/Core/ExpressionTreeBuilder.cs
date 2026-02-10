@@ -530,7 +530,7 @@ namespace Calais.Core
             };
         }
 
-        private Expression? BuildValuesOrExpression(Expression property, string op, List<object> values)
+        private static Expression? BuildValuesOrExpression(Expression property, string op, List<object> values)
         {
             Expression? result = null;
             foreach (var value in values)
@@ -544,7 +544,7 @@ namespace Calais.Core
             return result;
         }
 
-        private Expression? BuildComparisonExpression(Expression property, string op, object value)
+        private static Expression? BuildComparisonExpression(Expression property, string op, object value)
         {
             var isIgnoreCase = op.EndsWith("*");
             var baseOp = isIgnoreCase ? op.TrimEnd('*') : op;

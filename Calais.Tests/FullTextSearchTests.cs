@@ -37,7 +37,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should find posts with "test" in their content
             result.Should().HaveCountGreaterThan(0);
@@ -63,7 +63,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should find posts containing either "test" or "different"
             result.Should().HaveCountGreaterThan(0);
@@ -92,7 +92,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             result.Should().BeEmpty();
         }
@@ -122,7 +122,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should find posts with title containing "abc" AND content matching "test"
             result.Should().HaveCountGreaterThan(0);
@@ -163,7 +163,7 @@ namespace Calais.Tests
             };
 
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should find posts with title "another post" OR content matching "example"
             result.Should().HaveCountGreaterThan(0);
@@ -187,9 +187,9 @@ namespace Calais.Tests
                 ]
             };
 
-            var allPosts = await context.Posts.ToListAsync();
+            var allPosts = await context.Posts.ToListAsync(TestContext.Current.CancellationToken);
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Empty values should not filter anything
             result.Should().HaveCount(allPosts.Count);
@@ -213,9 +213,9 @@ namespace Calais.Tests
                 ]
             };
 
-            var allPosts = await context.Posts.ToListAsync();
+            var allPosts = await context.Posts.ToListAsync(TestContext.Current.CancellationToken);
             var result = await _processor.ApplyFilters(context.Posts, query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Null values should not filter anything
             result.Should().HaveCount(allPosts.Count);
@@ -241,7 +241,7 @@ namespace Calais.Tests
                 ]
             };
 
-            var result = await _processor.ApplyAsync(context.Posts, query);
+            var result = await _processor.ApplyAsync(context.Posts, query, TestContext.Current.CancellationToken);
 
             result.Items.Should().HaveCountLessThanOrEqualTo(2);
             result.Items.All(p => p.Content.Contains("test", StringComparison.OrdinalIgnoreCase)).Should().BeTrue();
@@ -267,7 +267,7 @@ namespace Calais.Tests
 
             var result = await _processor.ApplyFilters(
                 context.Users.Include(u => u.Posts), query)
-                .ToListAsync();
+                .ToListAsync(TestContext.Current.CancellationToken);
 
             // Should find users who have at least one post matching "test"
             result.Should().HaveCountGreaterThan(0);
