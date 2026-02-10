@@ -55,6 +55,7 @@ namespace Calais.Tests.Fixtures
                 Age = 25,
                 Email = "alice@example.com",
                 PasswordHash = "hash1",
+                Tags = ["developer", "admin"],
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"tagged\", \"score\": 100}")
             };
 
@@ -65,6 +66,7 @@ namespace Calais.Tests.Fixtures
                 Age = 30,
                 Email = "bob@example.com",
                 PasswordHash = "hash2",
+                Tags = ["developer", "tester"],
                 LockoutEnd = DateTimeOffset.UtcNow.AddDays(1),
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"other\", \"score\": 50}")
             };
@@ -76,6 +78,7 @@ namespace Calais.Tests.Fixtures
                 Age = 35,
                 Email = "charlie@example.com",
                 PasswordHash = "hash3",
+                Tags = ["admin", "manager"],
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"tagged\", \"score\": 75}")
             };
 
@@ -85,7 +88,8 @@ namespace Calais.Tests.Fixtures
                 Name = "diana",
                 Age = 22,
                 Email = "diana@example.com",
-                PasswordHash = "hash4"
+                PasswordHash = "hash4",
+                Tags = ["tester"]
             };
 
             var user5 = new User
@@ -94,7 +98,8 @@ namespace Calais.Tests.Fixtures
                 Name = "eve",
                 Age = 40,
                 Email = "eve@example.com",
-                PasswordHash = "hash5"
+                PasswordHash = "hash5",
+                Tags = []
             };
 
             context.Users.AddRange(user1, user2, user3, user4, user5);

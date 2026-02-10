@@ -236,5 +236,138 @@ namespace Calais.Tests
             // Should return all users since the filter is ignored
             result.Should().HaveCount(5);
         }
+
+        [Fact]
+        public async Task Filter_ArrayContains_SingleValue_ReturnsMatchingRecords()
+        {
+            await using var context = _fixture.CreateContext();
+
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "tags",
+                        Operator = "@=",
+                        Values = ["admin"]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync();
+
+            result.Should().HaveCount(2); // alice and charlie have "admin" tag
+            result.Select(u => u.Name).Should().BeEquivalentTo("alice", "charlie");
+        }
+
+        [Fact]
+        public async Task Filter_ArrayContains_MultipleValues_TreatsAsOr()
+        {
+            await using var context = _fixture.CreateContext();
+
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "tags",
+                        Operator = "@=",
+                        Values = ["admin", "tester"]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync();
+
+            // alice (admin), bob (tester), charlie (admin), diana (tester)
+            result.Should().HaveCount(4);
+            result.Select(u => u.Name).Should().BeEquivalentTo("alice", "bob", "charlie", "diana");
+        }
+
+        [Fact]
+        public async Task Filter_ArrayNotContains_SingleValue_ExcludesMatchingRecords()
+        {
+            await using var context = _fixture.CreateContext();
+
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "tags",
+                        Operator = "!@=",
+                        Values = ["developer"]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync();
+
+            // charlie (admin, manager), diana (tester), eve (empty)
+            result.Should().HaveCount(3);
+            result.Select(u => u.Name).Should().BeEquivalentTo("charlie", "diana", "eve");
+        }
+
+        [Fact]
+        public async Task Filter_ArrayContains_NoMatch_ReturnsEmpty()
+        {
+            await using var context = _fixture.CreateContext();
+
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "tags",
+                        Operator = "@=",
+                        Values = ["nonexistent"]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync();
+
+            result.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task Filter_ArrayContains_CombinedWithOtherFilters()
+        {
+            await using var context = _fixture.CreateContext();
+
+            var query = new CalaisQuery
+            {
+                Filters =
+                [
+                    new FilterDescriptor
+                    {
+                        Field = "tags",
+                        Operator = "@=",
+                        Values = ["developer"]
+                    },
+                    new FilterDescriptor
+                    {
+                        Field = "age",
+                        Operator = ">=",
+                        Values = [30]
+                    }
+                ]
+            };
+
+            var result = await _processor.ApplyFilters(context.Users, query)
+                .ToListAsync();
+
+            // Only bob is a developer AND age >= 30
+            result.Should().HaveCount(1);
+            result[0].Name.Should().Be("bob");
+        }
     }
 }

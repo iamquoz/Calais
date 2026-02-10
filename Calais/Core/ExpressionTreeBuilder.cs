@@ -17,17 +17,19 @@ namespace Calais.Core
     /// Builds expression trees for filtering and sorting based on CalaisQuery
     /// </summary>
     public class ExpressionTreeBuilder(CalaisOptions options)
-    {
-	    private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;
-        private static readonly MethodInfo StringStartsWithMethod = typeof(string).GetMethod(nameof(string.StartsWith), new[] { typeof(string) })!;
-        private static readonly MethodInfo StringEndsWithMethod = typeof(string).GetMethod(nameof(string.EndsWith), new[] { typeof(string) })!;
-        private static readonly MethodInfo StringToLowerMethod = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
-        private static readonly MethodInfo EnumerableCountMethod = typeof(Enumerable).GetMethods()
-            .First(m => m.Name == nameof(Enumerable.Count) && m.GetParameters().Length == 1);
-        private static readonly MethodInfo EnumerableAnyMethod = typeof(Enumerable).GetMethods()
-            .First(m => m.Name == nameof(Enumerable.Any) && m.GetParameters().Length == 2);
+	{
+		private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(nameof(string.Contains), new[] { typeof(string) })!;
+		private static readonly MethodInfo StringStartsWithMethod = typeof(string).GetMethod(nameof(string.StartsWith), new[] { typeof(string) })!;
+		private static readonly MethodInfo StringEndsWithMethod = typeof(string).GetMethod(nameof(string.EndsWith), new[] { typeof(string) })!;
+		private static readonly MethodInfo StringToLowerMethod = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
+		private static readonly MethodInfo EnumerableCountMethod = typeof(Enumerable).GetMethods()
+			.First(m => m.Name == nameof(Enumerable.Count) && m.GetParameters().Length == 1);
+		private static readonly MethodInfo EnumerableAnyMethod = typeof(Enumerable).GetMethods()
+			.First(m => m.Name == nameof(Enumerable.Any) && m.GetParameters().Length == 2);
+		private static readonly MethodInfo EnumerableContainsMethod = typeof(Enumerable).GetMethods()
+			.First(m => m.Name == nameof(Enumerable.Contains) && m.GetParameters().Length == 2);
 
-        // NpgsqlFullTextSearchLinqExtensions.Matches(NpgsqlTsVector, NpgsqlTsQuery) extension method
+		// NpgsqlFullTextSearchLinqExtensions.Matches(NpgsqlTsVector, NpgsqlTsQuery) extension method
         private static readonly MethodInfo TsVectorMatchesMethod = GetTsVectorMatchesMethod();
 
         // NpgsqlFullTextSearchDbFunctionsExtensions.ToTsQuery(DbFunctions, string config, string query)
@@ -544,13 +546,22 @@ namespace Calais.Core
 
         private Expression? BuildComparisonExpression(Expression property, string op, object value)
         {
+            var isIgnoreCase = op.EndsWith("*");
+            var baseOp = isIgnoreCase ? op.TrimEnd('*') : op;
+
+            // Check if property is an array/collection for contains operators
+            if (baseOp is "@=" or "!@=")
+            {
+                var arrayExpr = TryBuildArrayContainsExpression(property, value, baseOp == "!@=", isIgnoreCase);
+                if (arrayExpr != null)
+                    return arrayExpr;
+            }
+
             var convertedValue = ConvertValue(value, property.Type);
             if (convertedValue == null && property.Type.IsValueType && Nullable.GetUnderlyingType(property.Type) == null)
                 return null;
 
             var valueExpr = Expression.Constant(convertedValue, property.Type);
-            var isIgnoreCase = op.EndsWith("*");
-            var baseOp = isIgnoreCase ? op.TrimEnd('*') : op;
 
             Expression left = property;
             Expression right = valueExpr;
@@ -577,6 +588,47 @@ namespace Calais.Core
                 "!_-=" => BuildStringMethodCall(left, right, StringEndsWithMethod, true),
                 _ => null
             };
+        }
+
+        private static Expression? TryBuildArrayContainsExpression(Expression property, object value, bool negate, bool ignoreCase)
+        {
+            var propertyType = property.Type;
+
+            // Skip if it's a string (handled by string.Contains)
+            if (propertyType == typeof(string))
+                return null;
+
+            // Check if it's an array or implements IEnumerable<T>
+            Type? elementType = null;
+            if (propertyType.IsArray)
+            {
+                elementType = propertyType.GetElementType();
+            }
+            else if (propertyType.IsGenericType && typeof(IEnumerable).IsAssignableFrom(propertyType))
+            {
+                elementType = propertyType.GetGenericArguments().FirstOrDefault();
+            }
+
+            if (elementType == null)
+                return null;
+
+            // Convert the value to the element type
+            var convertedValue = ConvertValue(value, elementType);
+            if (convertedValue == null && elementType.IsValueType && Nullable.GetUnderlyingType(elementType) == null)
+                return null;
+
+            var valueExpr = Expression.Constant(convertedValue, elementType);
+
+            // Build Enumerable.Contains(array, value)
+            var containsMethod = EnumerableContainsMethod.MakeGenericMethod(elementType);
+            Expression containsCall = Expression.Call(containsMethod, property, valueExpr);
+
+            if (negate)
+            {
+                containsCall = Expression.Not(containsCall);
+            }
+
+            return containsCall;
         }
 
         private static Expression BuildStringMethodCall(Expression property, Expression value, MethodInfo method, bool negate)

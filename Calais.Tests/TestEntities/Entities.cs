@@ -15,6 +15,7 @@ namespace Calais.Tests.TestEntities
         public string PasswordHash { get; set; } = string.Empty;
         public DateTimeOffset? LockoutEnd { get; set; }
         public JsonDocument? JsonbColumn { get; set; }
+        public string[] Tags { get; set; } = [];
         public List<Post> Posts { get; set; } = [];
         public List<Comment> Comments { get; set; } = [];
     }

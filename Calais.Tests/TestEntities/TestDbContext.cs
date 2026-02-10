@@ -18,6 +18,8 @@ namespace Calais.Tests.TestEntities
                 entity.Property(e => e.PasswordHash).IsRequired();
                 entity.Property(e => e.JsonbColumn)
                     .HasColumnType("jsonb");
+                entity.Property(e => e.Tags)
+                    .HasColumnType("text[]");
             });
 
             modelBuilder.Entity<Post>(entity =>
