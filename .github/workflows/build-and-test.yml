@@ -8,6 +8,10 @@ on:
 
 jobs:
   build-and-test:
+    permissions:
+      contents: read
+      id-token: write
+
     runs-on: ubuntu-latest
 
     steps:
@@ -18,7 +22,7 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
-          8.0.x
+          10.0.x
 
     - name: Restore dependencies
       run: dotnet restore
@@ -27,18 +31,17 @@ jobs:
       run: dotnet build --no-restore --configuration Release
 
     - name: Run tests
-      run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+      run: dotnet test --no-build --configuration Release
 
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results
-        path: "**/TestResults/**/*.trx"
+    - name: Package
+      run: dotnet pack --no-build --configuration Release -o Packages
 
-    - name: Upload coverage reports
-      uses: actions/upload-artifact@v4
-      if: always()
+    - name: NuGet Login
+      uses: NuGet/login@v1
+      id: login
       with:
-        name: coverage-reports
-        path: "**/TestResults/**/coverage.cobertura.xml"
+        user: iamquoz
+      
+    - name: NuGet push
+      run: dotnet nuget push Packages/*.nupkg --api-key ${{steps.login.outputs.NUGET_API_KEY}} --source https://api.nuget.org/v3/index.json
+
