@@ -25,6 +25,9 @@ namespace Calais.Tests.TestEntities
         public JsonDocument? JsonbColumn { get; set; }
         public string[] Tags { get; set; } = [];
         public UserStatus Status { get; set; } = UserStatus.Pending;
+        public DateOnly? BirthDate { get; set; }
+        public TimeOnly? PreferredContactTime { get; set; }
+        public TimeSpan? SessionDuration { get; set; }
         public List<Post> Posts { get; set; } = [];
         public List<Comment> Comments { get; set; } = [];
     }

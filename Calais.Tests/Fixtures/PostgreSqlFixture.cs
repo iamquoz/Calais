@@ -56,6 +56,9 @@ namespace Calais.Tests.Fixtures
                 PasswordHash = "hash1",
                 Tags = ["developer", "admin"],
                 Status = UserStatus.Active,
+                BirthDate = new DateOnly(1999, 3, 15),
+                PreferredContactTime = new TimeOnly(9, 0),
+                SessionDuration = TimeSpan.FromHours(2),
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"tagged\", \"score\": 100}")
             };
 
@@ -68,6 +71,9 @@ namespace Calais.Tests.Fixtures
                 PasswordHash = "hash2",
                 Tags = ["developer", "tester"],
                 Status = UserStatus.Suspended,
+                BirthDate = new DateOnly(1994, 7, 22),
+                PreferredContactTime = new TimeOnly(14, 30),
+                SessionDuration = TimeSpan.FromMinutes(90),
                 LockoutEnd = DateTimeOffset.UtcNow.AddDays(1),
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"other\", \"score\": 50}")
             };
@@ -81,6 +87,9 @@ namespace Calais.Tests.Fixtures
                 PasswordHash = "hash3",
                 Tags = ["admin", "manager"],
                 Status = UserStatus.Active,
+                BirthDate = new DateOnly(1989, 12, 1),
+                PreferredContactTime = new TimeOnly(18, 0),
+                SessionDuration = TimeSpan.FromHours(3),
                 JsonbColumn = JsonDocument.Parse("{\"randomData\": \"tagged\", \"score\": 75}")
             };
 
@@ -92,7 +101,10 @@ namespace Calais.Tests.Fixtures
                 Email = "diana@example.com",
                 PasswordHash = "hash4",
                 Tags = ["tester"],
-                Status = UserStatus.Pending
+                Status = UserStatus.Pending,
+                BirthDate = new DateOnly(2002, 5, 10),
+                PreferredContactTime = new TimeOnly(8, 0),
+                SessionDuration = TimeSpan.FromMinutes(45)
             };
 
             var user5 = new User
@@ -104,6 +116,7 @@ namespace Calais.Tests.Fixtures
                 PasswordHash = "hash5",
                 Tags = [],
                 Status = UserStatus.Banned
+                // No BirthDate, PreferredContactTime, or SessionDuration (null)
             };
 
             context.Users.AddRange(user1, user2, user3, user4, user5);

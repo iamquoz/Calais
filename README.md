@@ -41,6 +41,10 @@ var processor = new CalaisBuilder()
     .Build();
 ```
 
+If you want to use the processor with dependency injection, see the [Dependency Injection](#dependency-injection) section below.
+
+> Note: Default page size and max page size are set to 10 and 100 respectively. If you want to remove pagination limits, call `WithMaxPageSize(int.MaxValue)`/`WithDefaultPageSize(int.MaxValue)`.
+
 ### 2. Create a query
 
 ```csharp

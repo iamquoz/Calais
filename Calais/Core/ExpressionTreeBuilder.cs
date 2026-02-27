@@ -667,6 +667,21 @@ namespace Calais.Core
                 return Guid.Parse(guidStr);
             }
 
+            if (underlyingType == typeof(DateOnly) && value is string dateOnlyStr)
+            {
+	            return DateOnly.Parse(dateOnlyStr);
+            }
+
+            if (underlyingType == typeof(TimeOnly) && value is string timeOnlyStr)
+            {
+                return TimeOnly.Parse(timeOnlyStr);
+            }
+
+            if (underlyingType == typeof(TimeSpan) && value is string timeSpanStr)
+            {
+                return TimeSpan.Parse(timeSpanStr);
+            }
+
             if (underlyingType == typeof(DateTime) && value is string dateStr)
             {
                 return DateTime.Parse(dateStr);

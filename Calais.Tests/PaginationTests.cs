@@ -1,10 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using Calais.Models;
 using Calais.Tests.Fixtures;
-using Calais.Tests.TestEntities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
