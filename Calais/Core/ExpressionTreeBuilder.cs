@@ -515,7 +515,7 @@ namespace Calais.Core
             if (filter.Values == null || filter.Values.Count == 0)
                 return null;
 
-            var value = Convert.ToInt32(filter.Values[0]);
+            var value = ConvertValue(filter.Values[0]);
             var valueExpr = Expression.Constant(value);
 
             return op switch
