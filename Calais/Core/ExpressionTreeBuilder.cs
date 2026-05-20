@@ -247,129 +247,159 @@ namespace Calais.Core
             ParameterExpression parameter,
             EntityConfiguration? entityConfig) where TEntity : class
         {
-            var parts = filter.Field!.Split('.');
-            var currentType = typeof(TEntity);
-            Expression currentExpr = parameter;
-
-            for (int i = 0; i < parts.Length - 1; i++)
-            {
-                var propInfo = currentType.GetProperty(parts[i], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (propInfo == null)
-                {
-	                return options.ThrowOnInvalidFields 
-		                ? throw new PropertyNotFoundException(parts[i], currentType) 
-		                : null;
-                }
-
-                currentExpr = Expression.Property(currentExpr, propInfo);
-                var propType = propInfo.PropertyType;
-
-                // Check if it's a collection
-                if (propType != typeof(string) && typeof(IEnumerable).IsAssignableFrom(propType))
-                {
-                    var elementType = propType.IsGenericType
-                        ? propType.GetGenericArguments()[0]
-                        : propType.GetElementType();
-
-                    if (elementType == null)
-                        return null;
-
-                    // Build inner expression for Any()
-                    var remainingPath = string.Join(".", parts.Skip(i + 1));
-                    var innerFilter = new FilterDescriptor
-                    {
-                        Field = remainingPath,
-                        Operator = filter.Operator,
-                        Values = filter.Values,
-                        IsVector = filter.IsVector,
-                        IsJson = filter.IsJson
-                    };
-
-                    var innerParam = Expression.Parameter(elementType, "inner");
-                    var innerExpr = BuildNestedOrDirectFilter(innerFilter, innerParam, elementType);
-
-                    if (innerExpr == null)
-                        return null;
-
-                    var anyMethod = EnumerableAnyMethod.MakeGenericMethod(elementType);
-                    var lambda = Expression.Lambda(innerExpr, innerParam);
-                    return Expression.Call(anyMethod, currentExpr, lambda);
-                }
-
-                currentType = propType;
-            }
-
-            // Final property
-            var finalProp = currentType.GetProperty(parts[^1], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (finalProp == null)
-            {
-                if (options.ThrowOnInvalidFields)
-                    throw new PropertyNotFoundException(parts[^1], currentType);
-                return null;
-            }
-
-            var finalExpr = Expression.Property(currentExpr, finalProp);
-            return BuildValuesOrExpression(finalExpr, filter.Operator ?? "==", filter.Values!);
+            return BuildPathFilterExpression(
+                typeof(TEntity),
+                parameter,
+                filter.Field!.Split('.'),
+                0,
+                filter);
         }
 
         private Expression? BuildNestedOrDirectFilter(FilterDescriptor filter, ParameterExpression param, Type entityType)
         {
-            if (filter.Field!.Contains("."))
+            return BuildPathFilterExpression(
+                entityType,
+                param,
+                filter.Field!.Split('.'),
+                0,
+                filter);
+        }
+
+        private Expression? BuildPathFilterExpression(
+            Type currentType,
+            Expression currentExpression,
+            string[] pathParts,
+            int partIndex,
+            FilterDescriptor filter)
+        {
+            var property = currentType.GetProperty(
+                pathParts[partIndex],
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+
+            if (property == null)
+                return BuildDerivedTypePathFilterExpression(
+                    currentType,
+                    currentExpression,
+                    pathParts,
+                    partIndex,
+                    filter);
+
+            var propertyExpression = Expression.Property(currentExpression, property);
+
+            if (partIndex == pathParts.Length - 1)
             {
-                var parts = filter.Field.Split('.');
-                Expression current = param;
-                var currentType = entityType;
-
-                for (int i = 0; i < parts.Length - 1; i++)
-                {
-                    var prop = currentType.GetProperty(parts[i], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (prop == null) return null;
-
-                    current = Expression.Property(current, prop);
-                    var propType = prop.PropertyType;
-
-                    if (propType != typeof(string) && typeof(IEnumerable).IsAssignableFrom(propType))
-                    {
-                        var elemType = propType.IsGenericType ? propType.GetGenericArguments()[0] : propType.GetElementType();
-                        if (elemType == null) return null;
-
-                        var remaining = string.Join(".", parts.Skip(i + 1));
-                        var innerFilter = new FilterDescriptor
-                        {
-                            Field = remaining,
-                            Operator = filter.Operator,
-                            Values = filter.Values,
-                            IsVector = filter.IsVector,
-                            IsJson = filter.IsJson
-                        };
-                        var innerParam = Expression.Parameter(elemType, "i" + i);
-                        var innerExpr = BuildNestedOrDirectFilter(innerFilter, innerParam, elemType);
-                        if (innerExpr == null) return null;
-
-                        var anyMethod = EnumerableAnyMethod.MakeGenericMethod(elemType);
-                        return Expression.Call(anyMethod, current, Expression.Lambda(innerExpr, innerParam));
-                    }
-                    currentType = propType;
-                }
-
-                var finalProp = currentType.GetProperty(parts[^1], BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (finalProp == null) return null;
-
-                var finalExpr = Expression.Property(current, finalProp);
-
-                return filter.IsVector 
-	                ? BuildVectorMatchExpression(finalExpr, filter.Values!) 
-	                : BuildValuesOrExpression(finalExpr, filter.Operator ?? "==", filter.Values!);
+                return filter.IsVector
+                    ? BuildVectorMatchExpression(propertyExpression, filter.Values!)
+                    : BuildValuesOrExpression(propertyExpression, filter.Operator ?? "==", filter.Values!);
             }
 
-            var directProp = entityType.GetProperty(filter.Field, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (directProp == null) return null;
+            var propertyType = property.PropertyType;
+            if (TryGetEnumerableElementType(propertyType, out var elementType))
+            {
+                var innerParameter = Expression.Parameter(elementType, $"i{partIndex}");
+                var innerExpression = BuildPathFilterExpression(
+                    elementType,
+                    innerParameter,
+                    pathParts,
+                    partIndex + 1,
+                    filter);
 
-            var directExpr = Expression.Property(param, directProp);
+                if (innerExpression == null)
+                    return null;
 
-            return filter.IsVector 
-	            ? BuildVectorMatchExpression(directExpr, filter.Values!) 
-	            : BuildValuesOrExpression(directExpr, filter.Operator ?? "==", filter.Values!);
+                var anyMethod = EnumerableAnyMethod.MakeGenericMethod(elementType);
+                return Expression.Call(
+                    anyMethod,
+                    propertyExpression,
+                    Expression.Lambda(innerExpression, innerParameter));
+            }
+
+            return BuildPathFilterExpression(
+                propertyType,
+                propertyExpression,
+                pathParts,
+                partIndex + 1,
+                filter);
+        }
+
+        private Expression? BuildDerivedTypePathFilterExpression(
+            Type currentType,
+            Expression currentExpression,
+            string[] pathParts,
+            int partIndex,
+            FilterDescriptor filter)
+        {
+            var derivedTypes = GetDerivedTypesWithProperty(currentType, pathParts[partIndex]).ToList();
+
+            if (derivedTypes.Count == 0)
+            {
+                if (options.ThrowOnInvalidFields)
+                    throw new PropertyNotFoundException(pathParts[partIndex], currentType);
+                return null;
+            }
+
+            Expression? result = null;
+            foreach (var derivedType in derivedTypes)
+            {
+                var typeCheck = Expression.TypeIs(currentExpression, derivedType);
+                var convertedExpression = Expression.Convert(currentExpression, derivedType);
+                var derivedExpression = BuildPathFilterExpression(
+                    derivedType,
+                    convertedExpression,
+                    pathParts,
+                    partIndex,
+                    filter);
+
+                if (derivedExpression == null)
+                    continue;
+
+                var guardedExpression = Expression.AndAlso(typeCheck, derivedExpression);
+                result = result == null ? guardedExpression : Expression.OrElse(result, guardedExpression);
+            }
+
+            return result;
+        }
+
+        private static IEnumerable<Type> GetDerivedTypesWithProperty(Type baseType, string propertyName)
+        {
+            return baseType.Assembly
+                .GetTypes()
+                .Where(type =>
+                    type != baseType
+                    && baseType.IsAssignableFrom(type)
+                    && type.GetProperty(
+                        propertyName,
+                        BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) != null);
+        }
+
+        private static bool TryGetEnumerableElementType(Type type, out Type elementType)
+        {
+            elementType = null!;
+
+            if (type == typeof(string) || !typeof(IEnumerable).IsAssignableFrom(type))
+                return false;
+
+            if (type.IsArray)
+            {
+                elementType = type.GetElementType()!;
+                return true;
+            }
+
+            if (type.IsGenericType)
+            {
+                elementType = type.GetGenericArguments()[0];
+                return true;
+            }
+
+            var enumerableInterface = type
+                .GetInterfaces()
+                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+
+            if (enumerableInterface == null)
+                return false;
+
+            elementType = enumerableInterface.GetGenericArguments()[0];
+            return true;
         }
 
         private Expression? BuildVectorExpression<TEntity>(
