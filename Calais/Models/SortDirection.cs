@@ -5,13 +5,13 @@ namespace Calais.Models;
 /// </summary>
 public enum SortDirection
 {
-    /// <summary>
-    /// Sort in ascending order.
-    /// </summary>
-    Asc,
+	/// <summary>
+	/// Sort in ascending order.
+	/// </summary>
+	Asc,
 
-    /// <summary>
-    /// Sort in descending order.
-    /// </summary>
-    Desc,
+	/// <summary>
+	/// Sort in descending order.
+	/// </summary>
+	Desc,
 }
