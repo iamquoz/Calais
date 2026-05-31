@@ -9,95 +9,94 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
-namespace Calais.Tests
+namespace Calais.Tests;
+
+[Collection("PostgreSql")]
+public class LengthOperatorTests
 {
-    [Collection("PostgreSql")]
-    public class LengthOperatorTests
-    {
-        private readonly PostgreSqlFixture _fixture;
-        private readonly CalaisProcessor _processor;
+	private readonly PostgreSqlFixture _fixture;
+	private readonly CalaisProcessor _processor;
 
-        public LengthOperatorTests(PostgreSqlFixture fixture)
-        {
-            _fixture = fixture;
-            _processor = new CalaisBuilder().Build();
-        }
+	public LengthOperatorTests(PostgreSqlFixture fixture)
+	{
+		_fixture = fixture;
+		_processor = new CalaisBuilder().Build();
+	}
 
-        [Fact]
-        public async Task Filter_LengthGreaterThanOrEqual_FiltersCollectionSize()
-        {
-            await using var context = _fixture.CreateContext();
+	[Fact]
+	public async Task Filter_LengthGreaterThanOrEqual_FiltersCollectionSize()
+	{
+		await using var context = _fixture.CreateContext();
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "comments",
-		                Operator = "len>=",
-		                Values = [1]
-	                }
-                ]
-            };
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "comments",
+					Operator = "len>=",
+					Values = [1],
+				},
+			],
+		};
 
-            var result = await _processor.ApplyFilters(
-                context.Users.Include(u => u.Comments), query)
-                .ToListAsync(TestContext.Current.CancellationToken);
+		var result = await _processor
+			.ApplyFilters(context.Users.Include(u => u.Comments), query)
+			.ToListAsync(TestContext.Current.CancellationToken);
 
-            // Users with at least 1 comment
-            result.Should().HaveCountGreaterThan(0);
-            result.All(u => u.Comments.Count >= 1).Should().BeTrue();
-        }
+		// Users with at least 1 comment
+		result.Should().HaveCountGreaterThan(0);
+		result.All(u => u.Comments.Count >= 1).Should().BeTrue();
+	}
 
-        [Fact]
-        public async Task Filter_LengthEquals_FiltersExactCount()
-        {
-            await using var context = _fixture.CreateContext();
+	[Fact]
+	public async Task Filter_LengthEquals_FiltersExactCount()
+	{
+		await using var context = _fixture.CreateContext();
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "posts",
-		                Operator = "len==",
-		                Values = [1]
-	                }
-                ]
-            };
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "posts",
+					Operator = "len==",
+					Values = [1],
+				},
+			],
+		};
 
-            var result = await _processor.ApplyFilters(
-                context.Users.Include(u => u.Posts), query)
-                .ToListAsync(TestContext.Current.CancellationToken);
+		var result = await _processor
+			.ApplyFilters(context.Users.Include(u => u.Posts), query)
+			.ToListAsync(TestContext.Current.CancellationToken);
 
-            result.All(u => u.Posts.Count == 1).Should().BeTrue();
-        }
+		result.All(u => u.Posts.Count == 1).Should().BeTrue();
+	}
 
-        [Fact]
-        public async Task Filter_LengthGreaterThan_FiltersCorrectly()
-        {
-            await using var context = _fixture.CreateContext();
+	[Fact]
+	public async Task Filter_LengthGreaterThan_FiltersCorrectly()
+	{
+		await using var context = _fixture.CreateContext();
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "comments",
-		                Operator = "len>",
-		                Values = [0]
-	                }
-                ]
-            };
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "comments",
+					Operator = "len>",
+					Values = [0],
+				},
+			],
+		};
 
-            var result = await _processor.ApplyFilters(
-                context.Users.Include(u => u.Comments), query)
-                .ToListAsync(TestContext.Current.CancellationToken);
+		var result = await _processor
+			.ApplyFilters(context.Users.Include(u => u.Comments), query)
+			.ToListAsync(TestContext.Current.CancellationToken);
 
-            result.All(u => u.Comments.Count > 0).Should().BeTrue();
-        }
-    }
+		result.All(u => u.Comments.Count > 0).Should().BeTrue();
+	}
 }

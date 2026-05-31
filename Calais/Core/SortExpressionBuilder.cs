@@ -8,204 +8,296 @@ using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
 
-namespace Calais.Core
+namespace Calais.Core;
+
+/// <summary>
+/// Builds sorting expressions from sort descriptors
+/// </summary>
+public class SortExpressionBuilder
 {
-    /// <summary>
-    /// Builds sorting expressions from sort descriptors
-    /// </summary>
-    public class SortExpressionBuilder
-    {
-        private readonly CalaisOptions _options;
+	private readonly CalaisOptions _options;
+	private readonly CustomMethodInvoker? _customMethodInvoker;
 
-        public SortExpressionBuilder(CalaisOptions options)
-        {
-            _options = options;
-        }
+	/// <summary>
+	/// Initializes a new instance of the <see cref="SortExpressionBuilder"/> class.
+	/// </summary>
+	/// <param name="options">The Calais processing options.</param>
+	public SortExpressionBuilder(CalaisOptions options)
+		: this(options, null) { }
 
-        /// <summary>
-        /// Applies sorting to a queryable based on sort descriptors
-        /// </summary>
-        public IQueryable<TEntity> ApplySorting<TEntity>(
-            IQueryable<TEntity> query,
-            List<SortDescriptor>? sorts) where TEntity : class
-        {
-            if (sorts == null || sorts.Count == 0)
-                return query;
+	internal SortExpressionBuilder(CalaisOptions options, CustomMethodInvoker? customMethodInvoker)
+	{
+		_options = options;
+		_customMethodInvoker = customMethodInvoker;
+	}
 
-            var entityConfig = _options.GetEntityConfiguration<TEntity>();
-            IOrderedQueryable<TEntity>? orderedQuery = null;
+	/// <summary>
+	/// Applies sorting to a queryable based on sort descriptors
+	/// </summary>
+	public IQueryable<TEntity> ApplySorting<TEntity>(
+		IQueryable<TEntity> query,
+		List<SortDescriptor>? sorts
+	)
+		where TEntity : class
+	{
+		var entityConfig = _options.GetEntityConfiguration<TEntity>();
+		var effectiveSorts = BuildEffectiveSorts(sorts, entityConfig);
+		if (effectiveSorts.Count == 0)
+			return query;
 
-            for (int i = 0; i < sorts.Count; i++)
-            {
-                var sort = sorts[i];
-                var isFirst = i == 0;
-                var direction = sort.GetDirection();
+		IOrderedQueryable<TEntity>? orderedQuery = null;
+		IQueryable<TEntity> currentQuery = query;
+		var hasAppliedSort = false;
 
-                if (sort.IsJson)
-                {
-                    orderedQuery = ApplyJsonSort(orderedQuery ?? (isFirst ? null : orderedQuery), 
-                        isFirst ? query : null, sort, direction);
-                    continue;
-                }
+		for (int i = 0; i < effectiveSorts.Count; i++)
+		{
+			var sort = effectiveSorts[i];
+			var isFirst = !hasAppliedSort;
+			var direction = sort.GetDirection();
 
-                // Check for custom sort
-                if (entityConfig?.CustomSorts.TryGetValue(sort.Field, out var customSort) == true)
-                {
-                    orderedQuery = ApplyCustomSort(orderedQuery, isFirst ? query : null, customSort, direction, isFirst);
-                    continue;
-                }
+			if (
+				_customMethodInvoker?.TryApplySort(
+					currentQuery,
+					sort,
+					!isFirst,
+					out var customSortedQuery
+				) == true
+			)
+			{
+				currentQuery = customSortedQuery;
+				orderedQuery = customSortedQuery as IOrderedQueryable<TEntity>;
+				hasAppliedSort = true;
+				continue;
+			}
 
-                // Check if property is sortable
-                if (entityConfig != null &&
-                    entityConfig.Properties.TryGetValue(sort.Field, out var propConfig) &&
-                    !propConfig.IsSortable)
-                {
-                    if (_options.ThrowOnInvalidFields)
-                        throw new PropertyNotSortableException(sort.Field);
-                    continue;
-                }
+			if (!isFirst && orderedQuery == null)
+			{
+				throw new ExpressionBuildException(
+					$"Cannot apply secondary sort '{sort.Field}' because the previous custom sort did not return an ordered query."
+				);
+			}
 
-                // Handle nested sorts
-                if (sort.Field.Contains("."))
-                {
-                    orderedQuery = ApplyNestedSort(orderedQuery, isFirst ? query : null, sort, direction, isFirst);
-                    continue;
-                }
+			if (sort.IsJson)
+			{
+				orderedQuery = ApplyJsonSort(
+					orderedQuery,
+					isFirst ? currentQuery : null,
+					sort,
+					direction
+				);
+				currentQuery = orderedQuery ?? currentQuery;
+				hasAppliedSort = orderedQuery != null || hasAppliedSort;
+				continue;
+			}
 
-                orderedQuery = ApplyPropertySort(orderedQuery, isFirst ? query : null, sort, direction, isFirst);
-            }
+			// Check if property is sortable
+			if (
+				entityConfig != null
+				&& entityConfig.Properties.TryGetValue(sort.Field, out var propConfig)
+				&& !propConfig.IsSortable
+			)
+			{
+				if (_options.ThrowOnInvalidFields)
+					throw new PropertyNotSortableException(sort.Field);
+				continue;
+			}
 
-            return orderedQuery ?? query;
-        }
+			// Handle nested sorts
+			if (sort.Field.Contains("."))
+			{
+				orderedQuery = ApplyNestedSort(
+					orderedQuery,
+					isFirst ? currentQuery : null,
+					sort,
+					direction,
+					isFirst
+				);
+				currentQuery = orderedQuery ?? currentQuery;
+				hasAppliedSort = orderedQuery != null || hasAppliedSort;
+				continue;
+			}
 
-        private IOrderedQueryable<TEntity>? ApplyPropertySort<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            SortDescriptor sort,
-            SortDirection direction,
-            bool isFirst) where TEntity : class
-        {
-            var parameter = Expression.Parameter(typeof(TEntity), "x");
-            var property = typeof(TEntity).GetProperty(sort.Field, 
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+			orderedQuery = ApplyPropertySort(
+				orderedQuery,
+				isFirst ? currentQuery : null,
+				sort,
+				direction,
+				isFirst
+			);
+			currentQuery = orderedQuery ?? currentQuery;
+			hasAppliedSort = orderedQuery != null || hasAppliedSort;
+		}
 
-            if (property == null)
-            {
-                if (_options.ThrowOnInvalidFields)
-                    throw new PropertyNotFoundException(sort.Field, typeof(TEntity));
-                return orderedQuery;
-            }
+		return currentQuery;
+	}
 
-            var propertyAccess = Expression.Property(parameter, property);
-            var lambda = Expression.Lambda(propertyAccess, parameter);
+	private static List<SortDescriptor> BuildEffectiveSorts(
+		List<SortDescriptor>? requestedSorts,
+		EntityConfiguration? entityConfig
+	)
+	{
+		var effectiveSorts = requestedSorts?.ToList() ?? [];
+		if (entityConfig?.DefaultSorts.Count is null or 0)
+			return effectiveSorts;
 
-            return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
-        }
+		foreach (var defaultSort in entityConfig.DefaultSorts)
+		{
+			if (
+				effectiveSorts.Any(sort =>
+					string.Equals(sort.Field, defaultSort.Field, StringComparison.OrdinalIgnoreCase)
+				)
+			)
+			{
+				continue;
+			}
 
-        private IOrderedQueryable<TEntity>? ApplyNestedSort<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            SortDescriptor sort,
-            SortDirection direction,
-            bool isFirst) where TEntity : class
-        {
-            var parameter = Expression.Parameter(typeof(TEntity), "x");
-            var parts = sort.Field.Split('.');
-            Expression current = parameter;
-            var currentType = typeof(TEntity);
+			effectiveSorts.Add(
+				new SortDescriptor
+				{
+					Field = defaultSort.Field,
+					Direction = defaultSort.Direction == SortDirection.Desc ? "desc" : "asc",
+				}
+			);
+		}
 
-            foreach (var part in parts)
-            {
-                var prop = currentType.GetProperty(part, 
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (prop == null)
-                {
-                    if (_options.ThrowOnInvalidFields)
-                        throw new PropertyNotFoundException(part, currentType);
-                    return orderedQuery;
-                }
-                current = Expression.Property(current, prop);
-                currentType = prop.PropertyType;
-            }
+		return effectiveSorts;
+	}
 
-            var lambda = Expression.Lambda(current, parameter);
-            return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
-        }
+	private IOrderedQueryable<TEntity>? ApplyPropertySort<TEntity>(
+		IOrderedQueryable<TEntity>? orderedQuery,
+		IQueryable<TEntity>? query,
+		SortDescriptor sort,
+		SortDirection direction,
+		bool isFirst
+	)
+		where TEntity : class
+	{
+		var parameter = Expression.Parameter(typeof(TEntity), "x");
+		var property = typeof(TEntity).GetProperty(
+			sort.Field,
+			BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+		);
 
-        private IOrderedQueryable<TEntity>? ApplyJsonSort<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            SortDescriptor sort,
-            SortDirection direction) where TEntity : class
-        {
-            var parts = sort.Field.Split('.');
-            if (parts.Length < 2)
-            {
-                if (_options.ThrowOnInvalidFields)
-                    throw new InvalidJsonPathException(sort.Field);
-                return orderedQuery;
-            }
+		if (property == null)
+		{
+			if (_options.ThrowOnInvalidFields)
+				throw new PropertyNotFoundException(sort.Field, typeof(TEntity));
+			return orderedQuery;
+		}
 
-            var parameter = Expression.Parameter(typeof(TEntity), "x");
-            var jsonProp = typeof(TEntity).GetProperty(parts[0], 
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+		var propertyAccess = Expression.Property(parameter, property);
+		var lambda = Expression.Lambda(propertyAccess, parameter);
 
-            if (jsonProp == null)
-            {
-                if (_options.ThrowOnInvalidFields)
-                    throw new PropertyNotFoundException(parts[0], typeof(TEntity));
-                return orderedQuery;
-            }
+		return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
+	}
 
-            Expression jsonExpr = Expression.Property(parameter, jsonProp);
+	private IOrderedQueryable<TEntity>? ApplyNestedSort<TEntity>(
+		IOrderedQueryable<TEntity>? orderedQuery,
+		IQueryable<TEntity>? query,
+		SortDescriptor sort,
+		SortDirection direction,
+		bool isFirst
+	)
+		where TEntity : class
+	{
+		var parameter = Expression.Parameter(typeof(TEntity), "x");
+		var parts = sort.Field.Split('.');
+		Expression current = parameter;
+		var currentType = typeof(TEntity);
 
-            if (jsonProp.PropertyType == typeof(JsonDocument))
-            {
-                var rootElementProp = typeof(JsonDocument).GetProperty("RootElement")!;
-                jsonExpr = Expression.Property(jsonExpr, rootElementProp);
-            }
+		foreach (var part in parts)
+		{
+			var prop = currentType.GetProperty(
+				part,
+				BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+			);
+			if (prop == null)
+			{
+				if (_options.ThrowOnInvalidFields)
+					throw new PropertyNotFoundException(part, currentType);
+				return orderedQuery;
+			}
+			current = Expression.Property(current, prop);
+			currentType = prop.PropertyType;
+		}
 
-            var getPropertyMethod = typeof(JsonElement).GetMethod("GetProperty", new[] { typeof(string) })!;
-            for (int i = 1; i < parts.Length; i++)
-            {
-                jsonExpr = Expression.Call(jsonExpr, getPropertyMethod, Expression.Constant(parts[i]));
-            }
+		var lambda = Expression.Lambda(current, parameter);
+		return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
+	}
 
-            var getStringMethod = typeof(JsonElement).GetMethod("GetString")!;
-            var stringExpr = Expression.Call(jsonExpr, getStringMethod);
+	private IOrderedQueryable<TEntity>? ApplyJsonSort<TEntity>(
+		IOrderedQueryable<TEntity>? orderedQuery,
+		IQueryable<TEntity>? query,
+		SortDescriptor sort,
+		SortDirection direction
+	)
+		where TEntity : class
+	{
+		var parts = sort.Field.Split('.');
+		if (parts.Length < 2)
+		{
+			if (_options.ThrowOnInvalidFields)
+				throw new InvalidJsonPathException(sort.Field);
+			return orderedQuery;
+		}
 
-            var lambda = Expression.Lambda(stringExpr, parameter);
-            var isFirst = query != null;
-            return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
-        }
+		var parameter = Expression.Parameter(typeof(TEntity), "x");
+		var jsonProp = typeof(TEntity).GetProperty(
+			parts[0],
+			BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+		);
 
-        private static IOrderedQueryable<TEntity>? ApplyCustomSort<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            LambdaExpression customSort,
-            SortDirection direction,
-            bool isFirst) where TEntity : class
-        {
-            return ApplyOrderBy(orderedQuery, query, customSort, direction, isFirst);
-        }
+		if (jsonProp == null)
+		{
+			if (_options.ThrowOnInvalidFields)
+				throw new PropertyNotFoundException(parts[0], typeof(TEntity));
+			return orderedQuery;
+		}
 
-        private static IOrderedQueryable<TEntity>? ApplyOrderBy<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            LambdaExpression keySelector,
-            SortDirection direction,
-            bool isFirst) where TEntity : class
-        {
-            var sourceQuery = isFirst ? query! : orderedQuery!;
-            var methodName = isFirst
-                ? (direction == SortDirection.Asc ? "OrderBy" : "OrderByDescending")
-                : (direction == SortDirection.Asc ? "ThenBy" : "ThenByDescending");
+		Expression jsonExpr = Expression.Property(parameter, jsonProp);
 
-            var method = typeof(Queryable).GetMethods()
-                .First(m => m.Name == methodName && m.GetParameters().Length == 2)
-                .MakeGenericMethod(typeof(TEntity), keySelector.ReturnType);
+		if (jsonProp.PropertyType == typeof(JsonDocument))
+		{
+			var rootElementProp = typeof(JsonDocument).GetProperty("RootElement")!;
+			jsonExpr = Expression.Property(jsonExpr, rootElementProp);
+		}
 
-            return (IOrderedQueryable<TEntity>)method.Invoke(null, [sourceQuery, keySelector])!;
-        }
-    }
+		var getPropertyMethod = typeof(JsonElement).GetMethod(
+			"GetProperty",
+			new[] { typeof(string) }
+		)!;
+		for (int i = 1; i < parts.Length; i++)
+		{
+			jsonExpr = Expression.Call(jsonExpr, getPropertyMethod, Expression.Constant(parts[i]));
+		}
+
+		var getStringMethod = typeof(JsonElement).GetMethod("GetString")!;
+		var stringExpr = Expression.Call(jsonExpr, getStringMethod);
+
+		var lambda = Expression.Lambda(stringExpr, parameter);
+		var isFirst = query != null;
+		return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
+	}
+
+	private static IOrderedQueryable<TEntity>? ApplyOrderBy<TEntity>(
+		IOrderedQueryable<TEntity>? orderedQuery,
+		IQueryable<TEntity>? query,
+		LambdaExpression keySelector,
+		SortDirection direction,
+		bool isFirst
+	)
+		where TEntity : class
+	{
+		var sourceQuery = isFirst ? query! : orderedQuery!;
+		var methodName = isFirst
+			? (direction == SortDirection.Asc ? "OrderBy" : "OrderByDescending")
+			: (direction == SortDirection.Asc ? "ThenBy" : "ThenByDescending");
+
+		var method = typeof(Queryable)
+			.GetMethods()
+			.First(m => m.Name == methodName && m.GetParameters().Length == 2)
+			.MakeGenericMethod(typeof(TEntity), keySelector.ReturnType);
+
+		return (IOrderedQueryable<TEntity>)method.Invoke(null, [sourceQuery, keySelector])!;
+	}
 }

@@ -1,4 +1,4 @@
 <Solution>
-  <Project Path="Calais.Tests/Calais.Tests.csproj" />
-  <Project Path="Calais/Calais.csproj" />
+	<Project Path="Calais.Tests/Calais.Tests.csproj" />
+	<Project Path="Calais/Calais.csproj" />
 </Solution>

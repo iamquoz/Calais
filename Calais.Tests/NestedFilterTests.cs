@@ -9,71 +9,70 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
-namespace Calais.Tests
+namespace Calais.Tests;
+
+[Collection("PostgreSql")]
+public class NestedFilterTests
 {
-    [Collection("PostgreSql")]
-    public class NestedFilterTests
-    {
-        private readonly PostgreSqlFixture _fixture;
-        private readonly CalaisProcessor _processor;
+	private readonly PostgreSqlFixture _fixture;
+	private readonly CalaisProcessor _processor;
 
-        public NestedFilterTests(PostgreSqlFixture fixture)
-        {
-            _fixture = fixture;
-            _processor = new CalaisBuilder().Build();
-        }
+	public NestedFilterTests(PostgreSqlFixture fixture)
+	{
+		_fixture = fixture;
+		_processor = new CalaisBuilder().Build();
+	}
 
-        [Fact]
-        public async Task Filter_NestedProperty_FiltersThroughNavigation()
-        {
-            await using var context = _fixture.CreateContext();
+	[Fact]
+	public async Task Filter_NestedProperty_FiltersThroughNavigation()
+	{
+		await using var context = _fixture.CreateContext();
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "comments.text",
-		                Operator = "@=",
-		                Values = ["good"]
-	                }
-                ]
-            };
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "comments.text",
+					Operator = "@=",
+					Values = ["good"],
+				},
+			],
+		};
 
-            var result = await _processor.ApplyFilters(
-                context.Users.Include(u => u.Comments), query)
-                .ToListAsync(TestContext.Current.CancellationToken);
+		var result = await _processor
+			.ApplyFilters(context.Users.Include(u => u.Comments), query)
+			.ToListAsync(TestContext.Current.CancellationToken);
 
-            // Users who have at least one comment containing "good"
-            result.Should().HaveCountGreaterThan(0);
-            result.All(u => u.Comments.Any(c => c.Text.Contains("good"))).Should().BeTrue();
-        }
+		// Users who have at least one comment containing "good"
+		result.Should().HaveCountGreaterThan(0);
+		result.All(u => u.Comments.Any(c => c.Text.Contains("good"))).Should().BeTrue();
+	}
 
-        [Fact]
-        public async Task Filter_NestedPostTitle_FiltersThroughPosts()
-        {
-            await using var context = _fixture.CreateContext();
+	[Fact]
+	public async Task Filter_NestedPostTitle_FiltersThroughPosts()
+	{
+		await using var context = _fixture.CreateContext();
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "posts.title",
-		                Operator = "@=",
-		                Values = ["abc"]
-	                }
-                ]
-            };
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "posts.title",
+					Operator = "@=",
+					Values = ["abc"],
+				},
+			],
+		};
 
-            var result = await _processor.ApplyFilters(
-                context.Users.Include(u => u.Posts), query)
-                .ToListAsync(TestContext.Current.CancellationToken);
+		var result = await _processor
+			.ApplyFilters(context.Users.Include(u => u.Posts), query)
+			.ToListAsync(TestContext.Current.CancellationToken);
 
-            result.Should().HaveCountGreaterThan(0);
-            result.All(u => u.Posts.Any(p => p.Title.Contains("abc"))).Should().BeTrue();
-        }
-    }
+		result.Should().HaveCountGreaterThan(0);
+		result.All(u => u.Posts.Any(p => p.Title.Contains("abc"))).Should().BeTrue();
+	}
 }
