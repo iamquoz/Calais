@@ -1,35 +1,137 @@
-namespace Calais.Models
+namespace Calais.Models;
+
+/// <summary>
+/// Supported filter operators matching Sieve-style syntax
+/// </summary>
+public static class FilterOperator
 {
     /// <summary>
-    /// Supported filter operators matching Sieve-style syntax
+    /// Equals comparison.
     /// </summary>
-    public static class FilterOperator
-    {
-        public const string Equals = "==";
-        public const string NotEquals = "!=";
-        public const string GreaterThan = ">";
-        public const string LessThan = "<";
-        public const string GreaterThanOrEqual = ">=";
-        public const string LessThanOrEqual = "<=";
-        public const string Contains = "@=";
-        public const string StartsWith = "_=";
-        public const string EndsWith = "_-=";
-        public const string DoesNotContain = "!@=";
-        public const string DoesNotStartWith = "!_=";
-        public const string DoesNotEndWith = "!_-=";
-        public const string EqualsIgnoreCase = "==*";
-        public const string NotEqualsIgnoreCase = "!=*";
-        public const string ContainsIgnoreCase = "@=*";
-        public const string StartsWithIgnoreCase = "_=*";
-        public const string EndsWithIgnoreCase = "_-=*";
-        public const string DoesNotContainIgnoreCase = "!@=*";
-        public const string DoesNotStartWithIgnoreCase = "!_=*";
-        public const string DoesNotEndWithIgnoreCase = "!_-=*";
-        public const string LengthEquals = "len==";
-        public const string LengthNotEquals = "len!=";
-        public const string LengthGreaterThan = "len>";
-        public const string LengthLessThan = "len<";
-        public const string LengthGreaterThanOrEqual = "len>=";
-        public const string LengthLessThanOrEqual = "len<=";
-    }
+    public new const string Equals = "==";
+
+    /// <summary>
+    /// Not equals comparison.
+    /// </summary>
+    public const string NotEquals = "!=";
+
+    /// <summary>
+    /// Greater-than comparison.
+    /// </summary>
+    public const string GreaterThan = ">";
+
+    /// <summary>
+    /// Less-than comparison.
+    /// </summary>
+    public const string LessThan = "<";
+
+    /// <summary>
+    /// Greater-than-or-equal comparison.
+    /// </summary>
+    public const string GreaterThanOrEqual = ">=";
+
+    /// <summary>
+    /// Less-than-or-equal comparison.
+    /// </summary>
+    public const string LessThanOrEqual = "<=";
+
+    /// <summary>
+    /// String or collection contains comparison.
+    /// </summary>
+    public const string Contains = "@=";
+
+    /// <summary>
+    /// String starts-with comparison.
+    /// </summary>
+    public const string StartsWith = "_=";
+
+    /// <summary>
+    /// String ends-with comparison.
+    /// </summary>
+    public const string EndsWith = "_-=";
+
+    /// <summary>
+    /// String or collection does-not-contain comparison.
+    /// </summary>
+    public const string DoesNotContain = "!@=";
+
+    /// <summary>
+    /// String does-not-start-with comparison.
+    /// </summary>
+    public const string DoesNotStartWith = "!_=";
+
+    /// <summary>
+    /// String does-not-end-with comparison.
+    /// </summary>
+    public const string DoesNotEndWith = "!_-=";
+
+    /// <summary>
+    /// Case-insensitive equals comparison.
+    /// </summary>
+    public const string EqualsIgnoreCase = "==*";
+
+    /// <summary>
+    /// Case-insensitive not-equals comparison.
+    /// </summary>
+    public const string NotEqualsIgnoreCase = "!=*";
+
+    /// <summary>
+    /// Case-insensitive contains comparison.
+    /// </summary>
+    public const string ContainsIgnoreCase = "@=*";
+
+    /// <summary>
+    /// Case-insensitive starts-with comparison.
+    /// </summary>
+    public const string StartsWithIgnoreCase = "_=*";
+
+    /// <summary>
+    /// Case-insensitive ends-with comparison.
+    /// </summary>
+    public const string EndsWithIgnoreCase = "_-=*";
+
+    /// <summary>
+    /// Case-insensitive does-not-contain comparison.
+    /// </summary>
+    public const string DoesNotContainIgnoreCase = "!@=*";
+
+    /// <summary>
+    /// Case-insensitive does-not-start-with comparison.
+    /// </summary>
+    public const string DoesNotStartWithIgnoreCase = "!_=*";
+
+    /// <summary>
+    /// Case-insensitive does-not-end-with comparison.
+    /// </summary>
+    public const string DoesNotEndWithIgnoreCase = "!_-=*";
+
+    /// <summary>
+    /// Length equals comparison.
+    /// </summary>
+    public const string LengthEquals = "len==";
+
+    /// <summary>
+    /// Length not-equals comparison.
+    /// </summary>
+    public const string LengthNotEquals = "len!=";
+
+    /// <summary>
+    /// Length greater-than comparison.
+    /// </summary>
+    public const string LengthGreaterThan = "len>";
+
+    /// <summary>
+    /// Length less-than comparison.
+    /// </summary>
+    public const string LengthLessThan = "len<";
+
+    /// <summary>
+    /// Length greater-than-or-equal comparison.
+    /// </summary>
+    public const string LengthGreaterThanOrEqual = "len>=";
+
+    /// <summary>
+    /// Length less-than-or-equal comparison.
+    /// </summary>
+    public const string LengthLessThanOrEqual = "len<=";
 }

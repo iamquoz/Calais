@@ -9,104 +9,102 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
-namespace Calais.Tests
+namespace Calais.Tests;
+
+[Collection("PostgreSql")]
+public class OrGroupFilterTests
 {
-    [Collection("PostgreSql")]
-    public class OrGroupFilterTests
+    private readonly PostgreSqlFixture _fixture;
+    private readonly CalaisProcessor _processor;
+
+    public OrGroupFilterTests(PostgreSqlFixture fixture)
     {
-        private readonly PostgreSqlFixture _fixture;
-        private readonly CalaisProcessor _processor;
+        _fixture = fixture;
+        _processor = new CalaisBuilder().Build();
+    }
 
-        public OrGroupFilterTests(PostgreSqlFixture fixture)
+    [Fact]
+    public async Task Filter_OrGroup_MatchesAnyCondition()
+    {
+        await using var context = _fixture.CreateContext();
+
+        var query = new CalaisQuery
         {
-            _fixture = fixture;
-            _processor = new CalaisBuilder().Build();
-        }
+            Filters =
+            [
+                new FilterDescriptor
+                {
+                    Or =
+                    [
+                        new FilterDescriptor
+                        {
+                            Field = "name",
+                            Operator = "==",
+                            Values = ["alice"],
+                        },
+                        new FilterDescriptor
+                        {
+                            Field = "age",
+                            Operator = ">",
+                            Values = [35],
+                        },
+                    ],
+                },
+            ],
+        };
 
-        [Fact]
-        public async Task Filter_OrGroup_MatchesAnyCondition()
+        var result = await _processor
+            .ApplyFilters(context.Users, query)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        // alice (name match) or eve (age > 35)
+        result.Should().HaveCount(2);
+        result.Select(u => u.Name).Should().BeEquivalentTo(new[] { "alice", "eve" });
+    }
+
+    [Fact]
+    public async Task Filter_OrGroupCombinedWithAnd_AppliesCorrectly()
+    {
+        await using var context = _fixture.CreateContext();
+
+        var query = new CalaisQuery
         {
-            await using var context = _fixture.CreateContext();
+            Filters =
+            [
+                new FilterDescriptor
+                {
+                    Field = "age",
+                    Operator = ">=",
+                    Values = [25],
+                },
+                new FilterDescriptor
+                {
+                    Or =
+                    [
+                        new FilterDescriptor
+                        {
+                            Field = "name",
+                            Operator = "==",
+                            Values = ["alice"],
+                        },
+                        new FilterDescriptor
+                        {
+                            Field = "name",
+                            Operator = "==",
+                            Values = ["charlie"],
+                        },
+                    ],
+                },
+            ],
+        };
 
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Or =
-		                [
-			                new FilterDescriptor
-			                {
-				                Field = "name",
-				                Operator = "==",
-				                Values = ["alice"]
-			                },
+        var result = await _processor
+            .ApplyFilters(context.Users, query)
+            .ToListAsync(TestContext.Current.CancellationToken);
 
-			                new FilterDescriptor
-			                {
-				                Field = "age",
-				                Operator = ">",
-				                Values = [35]
-			                }
-		                ]
-	                }
-                ]
-            };
-
-            var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync(TestContext.Current.CancellationToken);
-
-            // alice (name match) or eve (age > 35)
-            result.Should().HaveCount(2);
-            result.Select(u => u.Name).Should().BeEquivalentTo(new[] { "alice", "eve" });
-        }
-
-        [Fact]
-        public async Task Filter_OrGroupCombinedWithAnd_AppliesCorrectly()
-        {
-            await using var context = _fixture.CreateContext();
-
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "age",
-		                Operator = ">=",
-		                Values = [25]
-	                },
-
-	                new FilterDescriptor
-	                {
-		                Or =
-		                [
-			                new FilterDescriptor
-			                {
-				                Field = "name",
-				                Operator = "==",
-				                Values = ["alice"]
-			                },
-
-			                new FilterDescriptor
-			                {
-				                Field = "name",
-				                Operator = "==",
-				                Values = ["charlie"]
-			                }
-		                ]
-	                }
-                ]
-            };
-
-            var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync(TestContext.Current.CancellationToken);
-
-            // age >= 25 AND (name == alice OR name == charlie)
-            result.Should().HaveCount(2);
-            result.All(u => u.Age >= 25).Should().BeTrue();
-            result.Select(u => u.Name).Should().BeEquivalentTo(new[] { "alice", "charlie" });
-        }
+        // age >= 25 AND (name == alice OR name == charlie)
+        result.Should().HaveCount(2);
+        result.All(u => u.Age >= 25).Should().BeTrue();
+        result.Select(u => u.Name).Should().BeEquivalentTo(new[] { "alice", "charlie" });
     }
 }

@@ -10,162 +10,167 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
-namespace Calais.Tests
+namespace Calais.Tests;
+
+[Collection("PostgreSql")]
+public class ComplexQueryTests
 {
-    [Collection("PostgreSql")]
-    public class ComplexQueryTests
+    private readonly PostgreSqlFixture _fixture;
+    private readonly CalaisProcessor _processor;
+
+    public ComplexQueryTests(PostgreSqlFixture fixture)
     {
-        private readonly PostgreSqlFixture _fixture;
-        private readonly CalaisProcessor _processor;
+        _fixture = fixture;
+        var builder = new CalaisBuilder()
+            .ConfigureEntity<User>(e =>
+            {
+                e.Ignore(u => u.PasswordHash, sorts: true, filter: true);
+            })
+            .WithDefaultVectorLanguage("english");
+        _processor = new CalaisProcessor(
+            builder.Options,
+            new EmptyServiceProvider(),
+            null,
+            [new UserCustomSortMethods()]
+        );
+    }
 
-        public ComplexQueryTests(PostgreSqlFixture fixture)
+    [Fact]
+    public async Task CompleteQuery_AppliesAllOperations()
+    {
+        await using var context = _fixture.CreateContext();
+
+        // This mimics the example from the requirements
+        var query = new CalaisQuery
         {
-            _fixture = fixture;
-            var builder = new CalaisBuilder()
-                .ConfigureEntity<User>(e =>
+            Page = 1,
+            PageSize = 10,
+            Sorts =
+            [
+                new SortDescriptor { Field = "name", Direction = "asc" },
+                new SortDescriptor { Field = "age", Direction = "desc" },
+            ],
+            Filters =
+            [
+                new FilterDescriptor
                 {
-                    e.Ignore(u => u.PasswordHash, sorts: true, filter: true);
-                })
-                .WithDefaultVectorLanguage("english");
-            _processor = new CalaisProcessor(
-                builder.Options,
-                new EmptyServiceProvider(),
-                null,
-                [new UserCustomSortMethods()]);
-        }
+                    Field = "name",
+                    Operator = "==",
+                    Values = ["alice", "bob", "charlie"],
+                },
+                new FilterDescriptor
+                {
+                    Field = "age",
+                    Operator = ">=",
+                    Values = [20],
+                },
+                new FilterDescriptor
+                {
+                    Field = "age",
+                    Operator = "<=",
+                    Values = [35],
+                },
+            ],
+        };
 
-        [Fact]
-        public async Task CompleteQuery_AppliesAllOperations()
+        var result = await _processor.ApplyAsync(
+            context.Users.Include(u => u.Posts).Include(u => u.Comments),
+            query,
+            TestContext.Current.CancellationToken
+        );
+
+        result.Items.Should().HaveCount(3);
+        result.Items.Should().BeInAscendingOrder(u => u.Name);
+        result.Items.All(u => u.Age is >= 20 and <= 35).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ComplexOrQuery_CombinesConditionsCorrectly()
+    {
+        await using var context = _fixture.CreateContext();
+
+        var query = new CalaisQuery
         {
-            await using var context = _fixture.CreateContext();
+            Filters =
+            [
+                new FilterDescriptor
+                {
+                    Field = "age",
+                    Operator = ">=",
+                    Values = [25],
+                },
+                new FilterDescriptor
+                {
+                    Or =
+                    [
+                        new FilterDescriptor
+                        {
+                            Field = "name",
+                            Operator = "@=",
+                            Values = ["li"], // matches alice, charlie
+                        },
+                        new FilterDescriptor
+                        {
+                            Field = "age",
+                            Operator = ">=",
+                            Values = [35],
+                        },
+                    ],
+                },
+            ],
+        };
 
-            // This mimics the example from the requirements
-            var query = new CalaisQuery
+        var result = await _processor
+            .ApplyFilters(context.Users, query)
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        // age >= 25 AND (name contains 'li' OR age >= 35)
+        // alice(25, contains li), charlie(35, contains li AND age >= 35), eve(40, age >= 35)
+        result.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task QueryFromJson_ParsesAndExecutesCorrectly()
+    {
+        await using var context = _fixture.CreateContext();
+
+        var json = """
             {
-                Page = 1,
-                PageSize = 10,
-                Sorts =
-                [
-	                new SortDescriptor { Field = "name", Direction = "asc" },
-	                new SortDescriptor { Field = "age", Direction = "desc" }
-                ],
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "name",
-		                Operator = "==",
-		                Values = ["alice", "bob", "charlie"]
-	                },
+             "page": 1,
+             "pageSize": 10,
+             "sorts": [
+                 { "field": "name", "direction": "asc" }
+             ],
+             "filters": [
+                 {
+                     "field": "name",
+                     "operator": "@=",
+                     "values": ["a"]
+                 }
+             ]
+             }
+            """;
 
-	                new FilterDescriptor
-	                {
-		                Field = "age",
-		                Operator = ">=",
-		                Values = [20]
-	                },
+        var query = JsonSerializer.Deserialize<CalaisQuery>(
+            json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+        );
 
-	                new FilterDescriptor
-	                {
-		                Field = "age",
-		                Operator = "<=",
-		                Values = [35]
-	                }
-                ]
-            };
+        query.Should().NotBeNull();
 
-            var result = await _processor.ApplyAsync(
-                context.Users.Include(u => u.Posts).Include(u => u.Comments), 
-                query);
+        var result = await _processor.ApplyAsync(
+            context.Users,
+            query!,
+            TestContext.Current.CancellationToken
+        );
 
-            result.Items.Should().HaveCount(3);
-            result.Items.Should().BeInAscendingOrder(u => u.Name);
-            result.Items.All(u => u.Age is >= 20 and <= 35).Should().BeTrue();
-        }
+        // Names containing 'a': alice, charlie, diana
+        result.Items.Should().HaveCount(3);
+        result.Items.Should().BeInAscendingOrder(u => u.Name);
+    }
 
-        [Fact]
-        public async Task ComplexOrQuery_CombinesConditionsCorrectly()
-        {
-            await using var context = _fixture.CreateContext();
-
-            var query = new CalaisQuery
-            {
-                Filters =
-                [
-	                new FilterDescriptor
-	                {
-		                Field = "age",
-		                Operator = ">=",
-		                Values = [25]
-	                },
-
-	                new FilterDescriptor
-	                {
-		                Or =
-		                [
-			                new FilterDescriptor
-			                {
-				                Field = "name",
-				                Operator = "@=",
-				                Values = ["li"] // matches alice, charlie
-			                },
-
-			                new FilterDescriptor
-			                {
-				                Field = "age",
-				                Operator = ">=",
-				                Values = [35]
-			                }
-		                ]
-	                }
-                ]
-            };
-
-            var result = await _processor.ApplyFilters(context.Users, query)
-                .ToListAsync(TestContext.Current.CancellationToken);
-
-            // age >= 25 AND (name contains 'li' OR age >= 35)
-            // alice(25, contains li), charlie(35, contains li AND age >= 35), eve(40, age >= 35)
-            result.Should().HaveCount(3);
-        }
-
-        [Fact]
-        public async Task QueryFromJson_ParsesAndExecutesCorrectly()
-        {
-            await using var context = _fixture.CreateContext();
-
-            var json = """
-                       {
-                        "page": 1,
-                        "pageSize": 10,
-                        "sorts": [
-                            { "field": "name", "direction": "asc" }
-                        ],
-                        "filters": [
-                            {
-                                "field": "name",
-                                "operator": "@=",
-                                "values": ["a"]
-                            }
-                        ]
-                        }
-                       """;
-
-            var query = JsonSerializer.Deserialize<CalaisQuery>(json, 
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            query.Should().NotBeNull();
-
-            var result = await _processor.ApplyAsync(context.Users, query!);
-
-            // Names containing 'a': alice, charlie, diana
-            result.Items.Should().HaveCount(3);
-            result.Items.Should().BeInAscendingOrder(u => u.Name);
-        }
-
-        private sealed class EmptyServiceProvider : IServiceProvider
-        {
-            public object? GetService(Type serviceType) => null;
-        }
+    private sealed class EmptyServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => null;
     }
 }
