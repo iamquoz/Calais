@@ -20,10 +20,12 @@ namespace Calais.Tests
         public SortTests(PostgreSqlFixture fixture)
         {
             _fixture = fixture;
-            _processor = new CalaisBuilder()
-                .ConfigureEntity<User>(e => 
-                    e.AddSort("is_banned", u => u.LockoutEnd != null))
-                .Build();
+            var builder = new CalaisBuilder();
+            _processor = new CalaisProcessor(
+                builder.Options,
+                new EmptyServiceProvider(),
+                null,
+                [new UserCustomSortMethods()]);
         }
 
         [Fact]
@@ -97,6 +99,11 @@ namespace Calais.Tests
             result.Should().HaveCount(5);
             // Bob has LockoutEnd set, so should be first
             result.First().LockoutEnd.Should().NotBeNull();
+        }
+
+        private sealed class EmptyServiceProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

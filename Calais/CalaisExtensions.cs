@@ -84,7 +84,11 @@ namespace Calais
             configure?.Invoke(builder);
 
             services.AddSingleton(builder.Options);
-            services.AddSingleton(builder.Build());
+            services.AddScoped<CalaisProcessor>(provider => new CalaisProcessor(
+                provider.GetRequiredService<CalaisOptions>(),
+                provider,
+                provider.GetServices<ICalaisCustomFilterMethods>(),
+                provider.GetServices<ICalaisCustomSortMethods>()));
 
             return services;
         }

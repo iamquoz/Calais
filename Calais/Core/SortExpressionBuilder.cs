@@ -16,10 +16,17 @@ namespace Calais.Core
     public class SortExpressionBuilder
     {
         private readonly CalaisOptions _options;
+        private readonly CustomMethodInvoker? _customMethodInvoker;
 
         public SortExpressionBuilder(CalaisOptions options)
+            : this(options, null)
+        {
+        }
+
+        internal SortExpressionBuilder(CalaisOptions options, CustomMethodInvoker? customMethodInvoker)
         {
             _options = options;
+            _customMethodInvoker = customMethodInvoker;
         }
 
         /// <summary>
@@ -29,29 +36,41 @@ namespace Calais.Core
             IQueryable<TEntity> query,
             List<SortDescriptor>? sorts) where TEntity : class
         {
-            if (sorts == null || sorts.Count == 0)
+            var entityConfig = _options.GetEntityConfiguration<TEntity>();
+            var effectiveSorts = BuildEffectiveSorts(sorts, entityConfig);
+            if (effectiveSorts.Count == 0)
                 return query;
 
-            var entityConfig = _options.GetEntityConfiguration<TEntity>();
             IOrderedQueryable<TEntity>? orderedQuery = null;
+            IQueryable<TEntity> currentQuery = query;
+            var hasAppliedSort = false;
 
-            for (int i = 0; i < sorts.Count; i++)
+            for (int i = 0; i < effectiveSorts.Count; i++)
             {
-                var sort = sorts[i];
-                var isFirst = i == 0;
+                var sort = effectiveSorts[i];
+                var isFirst = !hasAppliedSort;
                 var direction = sort.GetDirection();
 
-                if (sort.IsJson)
+                if (_customMethodInvoker?.TryApplySort(currentQuery, sort, !isFirst, out var customSortedQuery) == true)
                 {
-                    orderedQuery = ApplyJsonSort(orderedQuery ?? (isFirst ? null : orderedQuery), 
-                        isFirst ? query : null, sort, direction);
+                    currentQuery = customSortedQuery;
+                    orderedQuery = customSortedQuery as IOrderedQueryable<TEntity>;
+                    hasAppliedSort = true;
                     continue;
                 }
 
-                // Check for custom sort
-                if (entityConfig?.CustomSorts.TryGetValue(sort.Field, out var customSort) == true)
+                if (!isFirst && orderedQuery == null)
                 {
-                    orderedQuery = ApplyCustomSort(orderedQuery, isFirst ? query : null, customSort, direction, isFirst);
+                    throw new ExpressionBuildException(
+                        $"Cannot apply secondary sort '{sort.Field}' because the previous custom sort did not return an ordered query.");
+                }
+
+                if (sort.IsJson)
+                {
+                    orderedQuery = ApplyJsonSort(orderedQuery,
+                        isFirst ? currentQuery : null, sort, direction);
+                    currentQuery = orderedQuery ?? currentQuery;
+                    hasAppliedSort = orderedQuery != null || hasAppliedSort;
                     continue;
                 }
 
@@ -68,14 +87,44 @@ namespace Calais.Core
                 // Handle nested sorts
                 if (sort.Field.Contains("."))
                 {
-                    orderedQuery = ApplyNestedSort(orderedQuery, isFirst ? query : null, sort, direction, isFirst);
+                    orderedQuery = ApplyNestedSort(orderedQuery, isFirst ? currentQuery : null, sort, direction, isFirst);
+                    currentQuery = orderedQuery ?? currentQuery;
+                    hasAppliedSort = orderedQuery != null || hasAppliedSort;
                     continue;
                 }
 
-                orderedQuery = ApplyPropertySort(orderedQuery, isFirst ? query : null, sort, direction, isFirst);
+                orderedQuery = ApplyPropertySort(orderedQuery, isFirst ? currentQuery : null, sort, direction, isFirst);
+                currentQuery = orderedQuery ?? currentQuery;
+                hasAppliedSort = orderedQuery != null || hasAppliedSort;
             }
 
-            return orderedQuery ?? query;
+            return currentQuery;
+        }
+
+        private static List<SortDescriptor> BuildEffectiveSorts(
+            List<SortDescriptor>? requestedSorts,
+            EntityConfiguration? entityConfig)
+        {
+            var effectiveSorts = requestedSorts?.ToList() ?? [];
+            if (entityConfig?.DefaultSorts.Count is null or 0)
+                return effectiveSorts;
+
+            foreach (var defaultSort in entityConfig.DefaultSorts)
+            {
+                if (effectiveSorts.Any(sort =>
+                        string.Equals(sort.Field, defaultSort.Field, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                effectiveSorts.Add(new SortDescriptor
+                {
+                    Field = defaultSort.Field,
+                    Direction = defaultSort.Direction == SortDirection.Desc ? "desc" : "asc"
+                });
+            }
+
+            return effectiveSorts;
         }
 
         private IOrderedQueryable<TEntity>? ApplyPropertySort<TEntity>(
@@ -177,16 +226,6 @@ namespace Calais.Core
             var lambda = Expression.Lambda(stringExpr, parameter);
             var isFirst = query != null;
             return ApplyOrderBy(orderedQuery, query, lambda, direction, isFirst);
-        }
-
-        private static IOrderedQueryable<TEntity>? ApplyCustomSort<TEntity>(
-            IOrderedQueryable<TEntity>? orderedQuery,
-            IQueryable<TEntity>? query,
-            LambdaExpression customSort,
-            SortDirection direction,
-            bool isFirst) where TEntity : class
-        {
-            return ApplyOrderBy(orderedQuery, query, customSort, direction, isFirst);
         }
 
         private static IOrderedQueryable<TEntity>? ApplyOrderBy<TEntity>(

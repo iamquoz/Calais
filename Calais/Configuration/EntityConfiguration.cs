@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
+using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
+using Calais.Models;
 
 namespace Calais.Configuration
 {
@@ -15,8 +19,28 @@ namespace Calais.Configuration
         public bool IsFilterable { get; set; } = true;
         public bool IsVector { get; set; }
         public string? VectorLanguage { get; set; }
-        public LambdaExpression? CustomSortExpression { get; set; }
-        public LambdaExpression? CustomFilterExpression { get; set; }
+    }
+
+    /// <summary>
+    /// Configuration for a default sort field.
+    /// </summary>
+    public sealed class DefaultSortConfiguration
+    {
+        public DefaultSortConfiguration(string field, SortDirection direction)
+        {
+            Field = field;
+            Direction = direction;
+        }
+
+        /// <summary>
+        /// The field path to sort by.
+        /// </summary>
+        public string Field { get; }
+
+        /// <summary>
+        /// The default sort direction.
+        /// </summary>
+        public SortDirection Direction { get; }
     }
 
     /// <summary>
@@ -26,8 +50,7 @@ namespace Calais.Configuration
     {
         public Type EntityType { get; }
         public Dictionary<string, PropertyConfiguration> Properties { get; } = new Dictionary<string, PropertyConfiguration>(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, LambdaExpression> CustomSorts { get; } = new Dictionary<string, LambdaExpression>(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, LambdaExpression> CustomFilters { get; } = new Dictionary<string, LambdaExpression>(StringComparer.OrdinalIgnoreCase);
+        public List<DefaultSortConfiguration> DefaultSorts { get; } = [];
 
         public EntityConfiguration(Type entityType)
         {
@@ -70,25 +93,14 @@ namespace Calais.Configuration
         }
 
         /// <summary>
-        /// Adds a custom sort expression for a named sort key
+        /// Adds the first default sort for this entity.
         /// </summary>
-        public EntityConfigurationBuilder<TEntity> AddSort<TProperty>(
-            string sortKey,
-            Expression<Func<TEntity, TProperty>> sortExpression)
+        public DefaultSortConfigurationBuilder<TEntity> AddDefaultSort<TProperty>(
+            Expression<Func<TEntity, TProperty>> sortExpression,
+            SortDirection direction = SortDirection.Asc)
         {
-            _configuration.CustomSorts[sortKey] = sortExpression;
-            return this;
-        }
-
-        /// <summary>
-        /// Adds a custom filter expression for a named filter key
-        /// </summary>
-        public EntityConfigurationBuilder<TEntity> AddFilter<TProperty>(
-            string filterKey,
-            Expression<Func<TEntity, TProperty>> filterExpression)
-        {
-            _configuration.CustomFilters[filterKey] = filterExpression;
-            return this;
+            AddDefaultSortInternal(sortExpression, direction);
+            return new DefaultSortConfigurationBuilder<TEntity>(this);
         }
 
         /// <summary>
@@ -135,6 +147,93 @@ namespace Calais.Configuration
                 return memberExpression.Member.Name;
             }
             throw new ArgumentException("Expression must be a member expression", nameof(expression));
+        }
+
+        internal void AddDefaultSortInternal<TProperty>(
+            Expression<Func<TEntity, TProperty>> sortExpression,
+            SortDirection direction)
+        {
+            var fieldPath = GetMemberPath(sortExpression);
+            _configuration.DefaultSorts.Add(new DefaultSortConfiguration(fieldPath, direction));
+        }
+
+        private static string GetMemberPath<TProperty>(Expression<Func<TEntity, TProperty>> expression)
+        {
+            var members = new Stack<MemberInfo>();
+            Expression? current = StripConvert(expression.Body);
+
+            while (current is MemberExpression memberExpression)
+            {
+                members.Push(memberExpression.Member);
+                current = StripConvert(memberExpression.Expression);
+            }
+
+            if (current != expression.Parameters[0] || members.Count == 0)
+            {
+                throw new ArgumentException("Expression must be a member access chain", nameof(expression));
+            }
+
+            var memberArray = members.ToArray();
+            RejectCollectionNavigation(memberArray, expression);
+            return string.Join(".", memberArray.Select(member => member.Name));
+        }
+
+        private static Expression? StripConvert(Expression? expression)
+        {
+            while (expression is UnaryExpression unaryExpression
+                   && (unaryExpression.NodeType == ExpressionType.Convert
+                       || unaryExpression.NodeType == ExpressionType.ConvertChecked))
+            {
+                expression = unaryExpression.Operand;
+            }
+
+            return expression;
+        }
+
+        private static void RejectCollectionNavigation<TProperty>(
+            IReadOnlyList<MemberInfo> members,
+            Expression<Func<TEntity, TProperty>> expression)
+        {
+            for (var i = 0; i < members.Count; i++)
+            {
+                var memberType = members[i] switch
+                {
+                    PropertyInfo propertyInfo => propertyInfo.PropertyType,
+                    FieldInfo fieldInfo => fieldInfo.FieldType,
+                    _ => throw new ArgumentException("Expression must be a property or field access chain", nameof(expression))
+                };
+
+                if (memberType != typeof(string)
+                    && typeof(IEnumerable).IsAssignableFrom(memberType))
+                {
+                    throw new ArgumentException("Default sorts do not support collection navigation", nameof(expression));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fluent builder for additional default sorts.
+    /// </summary>
+    /// <typeparam name="TEntity">The entity type being configured</typeparam>
+    public sealed class DefaultSortConfigurationBuilder<TEntity> where TEntity : class
+    {
+        private readonly EntityConfigurationBuilder<TEntity> _entityBuilder;
+
+        internal DefaultSortConfigurationBuilder(EntityConfigurationBuilder<TEntity> entityBuilder)
+        {
+            _entityBuilder = entityBuilder;
+        }
+
+        /// <summary>
+        /// Adds a secondary default sort.
+        /// </summary>
+        public DefaultSortConfigurationBuilder<TEntity> ThenBy<TProperty>(
+            Expression<Func<TEntity, TProperty>> sortExpression,
+            SortDirection direction = SortDirection.Asc)
+        {
+            _entityBuilder.AddDefaultSortInternal(sortExpression, direction);
+            return this;
         }
     }
 }

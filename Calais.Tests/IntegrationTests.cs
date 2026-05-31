@@ -21,16 +21,19 @@ namespace Calais.Tests
         public IntegrationTests(PostgreSqlFixture fixture)
         {
             _fixture = fixture;
-            _processor = new CalaisBuilder()
+            var builder = new CalaisBuilder()
                 .ConfigureEntity<User>(e =>
                 {
                     e.Ignore(u => u.PasswordHash, sorts: true, filter: true);
-                    e.AddSort("is_banned", u => u.LockoutEnd != null);
                 })
                 .WithDefaultVectorLanguage("english")
                 .WithDefaultPageSize(10)
-                .WithMaxPageSize(100)
-                .Build();
+                .WithMaxPageSize(100);
+            _processor = new CalaisProcessor(
+                builder.Options,
+                new EmptyServiceProvider(),
+                null,
+                [new UserCustomSortMethods()]);
         }
 
         [Fact]
@@ -298,6 +301,11 @@ namespace Calais.Tests
             // alice, bob, charlie each have 1 post
             result.Should().HaveCount(3);
             result.All(u => u.Posts.Count >= 1).Should().BeTrue();
+        }
+
+        private sealed class EmptyServiceProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

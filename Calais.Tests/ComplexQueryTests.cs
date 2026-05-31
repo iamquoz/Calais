@@ -21,14 +21,17 @@ namespace Calais.Tests
         public ComplexQueryTests(PostgreSqlFixture fixture)
         {
             _fixture = fixture;
-            _processor = new CalaisBuilder()
+            var builder = new CalaisBuilder()
                 .ConfigureEntity<User>(e =>
                 {
                     e.Ignore(u => u.PasswordHash, sorts: true, filter: true);
-                    e.AddSort("is_banned", u => u.LockoutEnd != null);
                 })
-                .WithDefaultVectorLanguage("english")
-                .Build();
+                .WithDefaultVectorLanguage("english");
+            _processor = new CalaisProcessor(
+                builder.Options,
+                new EmptyServiceProvider(),
+                null,
+                [new UserCustomSortMethods()]);
         }
 
         [Fact]
@@ -158,6 +161,11 @@ namespace Calais.Tests
             // Names containing 'a': alice, charlie, diana
             result.Items.Should().HaveCount(3);
             result.Items.Should().BeInAscendingOrder(u => u.Name);
+        }
+
+        private sealed class EmptyServiceProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

@@ -9,7 +9,8 @@ A flexible C# query building library for Entity Framework Core with PostgreSQL/N
 - **JSONB document querying** - Filter and sort on `JsonDocument` properties
 - **Nested property navigation** - Support for paths like `comments.text` or `posts.title`
 - **Opt-in entities, opt-out fields** - Entity-level configuration with field-level overrides
-- **Custom sorts and filters** - Attach custom expressions to field names
+- **Scoped custom sorts and filters** - Add custom query methods with DI access
+- **Default entity sorts** - Configure stable fallback sort chains per entity
 - **Separate pagination** - Pagination can be applied independently from filtering/sorting
 - **OR group support** - Complex nested conditions with OR logic
 - **Length operators** - Filter by collection size with `len>=`, `len==`, etc.
@@ -29,8 +30,9 @@ var processor = new CalaisBuilder()
         // Ignore sensitive fields
         e.Ignore(u => u.PasswordHash, sorts: true, filter: true);
         
-        // Add custom sorts
-        e.AddSort("is_banned", u => u.LockoutEnd != null);
+        // Add stable default ordering
+        e.AddDefaultSort(u => u.Name)
+            .ThenBy(u => u.Email, SortDirection.Desc);
         
         // Configure vector fields
         e.AsVector(u => u.SearchVector, language: "english");
@@ -206,12 +208,69 @@ var page2 = await processor.ApplyPagination(filteredQuery, 2, 10).ToListAsync();
 ```csharp
 services.AddCalais(builder =>
 {
-    builder.ConfigureEntity<User>(e => e.Ignore(u => u.PasswordHash));
+    builder.ConfigureEntity<User>(e =>
+    {
+        e.Ignore(u => u.PasswordHash);
+        e.AddDefaultSort(u => u.Name);
+    });
     builder.WithDefaultPageSize(20);
 });
+
+services.AddScoped<ICalaisCustomFilterMethods, UserFilters>();
+services.AddScoped<ICalaisCustomSortMethods, UserSorts>();
 ```
 
 Then inject `CalaisProcessor` where needed.
+
+## Custom Sorts and Filters
+
+Custom methods are discovered by matching the request field name to a public method name, case-insensitively. Method services are scoped, so they can use constructor injection or `context.Services` to access a `DbContext` or other services.
+
+```csharp
+public sealed class UserFilters(AppDbContext dbContext) : ICalaisCustomFilterMethods
+{
+    public IQueryable<User> hasRole(IQueryable<User> source, CalaisFilterContext context)
+    {
+        var role = context.Values.First().ToString();
+        var userIds = dbContext.UserRoles
+            .Where(r => r.Role.Name == role)
+            .Select(r => r.UserId);
+
+        return source.Where(u => userIds.Contains(u.Id));
+    }
+}
+
+public sealed class UserSorts : ICalaisCustomSortMethods
+{
+    public IQueryable<User> isBanned(IQueryable<User> source, CalaisSortContext context)
+    {
+        if (context.UseThenBy && source is IOrderedQueryable<User> ordered)
+        {
+            return context.Direction == SortDirection.Desc
+                ? ordered.ThenByDescending(u => u.LockoutEnd != null)
+                : ordered.ThenBy(u => u.LockoutEnd != null);
+        }
+
+        return context.Direction == SortDirection.Desc
+            ? source.OrderByDescending(u => u.LockoutEnd != null)
+            : source.OrderBy(u => u.LockoutEnd != null);
+    }
+}
+```
+
+Custom filters are query transforms, so they cannot be composed inside `or` groups. In strict mode Calais throws; otherwise those custom filters are ignored inside the group.
+
+## Default Sorts
+
+Default sorts are configured per entity and appended after request sorts when the request did not already sort by that field:
+
+```csharp
+builder.ConfigureEntity<Book>(e => e
+    .AddDefaultSort(b => b.Name)
+    .ThenBy(b => b.Author.Name, SortDirection.Desc));
+```
+
+If a request has no sorts, Calais applies the full default chain. If a request sorts by `author.name`, Calais preserves that request sort and appends `name asc` as the missing default.
 
 ## Example: Complete Query
 

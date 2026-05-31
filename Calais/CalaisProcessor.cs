@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Calais.Configuration;
 using Calais.Core;
+using Calais.Exceptions;
 using Calais.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,12 +19,27 @@ namespace Calais
         private readonly CalaisOptions _options;
         private readonly ExpressionTreeBuilder _expressionBuilder;
         private readonly SortExpressionBuilder _sortBuilder;
+        private readonly CustomMethodInvoker _customMethodInvoker;
 
         public CalaisProcessor(CalaisOptions options)
+            : this(options, EmptyServiceProvider.Instance, [], [])
+        {
+        }
+
+        public CalaisProcessor(
+            CalaisOptions options,
+            IServiceProvider services,
+            IEnumerable<ICalaisCustomFilterMethods>? customFilterMethods,
+            IEnumerable<ICalaisCustomSortMethods>? customSortMethods)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
+            _customMethodInvoker = new CustomMethodInvoker(
+                options,
+                services ?? throw new ArgumentNullException(nameof(services)),
+                customFilterMethods,
+                customSortMethods);
             _expressionBuilder = new ExpressionTreeBuilder(options);
-            _sortBuilder = new SortExpressionBuilder(options);
+            _sortBuilder = new SortExpressionBuilder(options, _customMethodInvoker);
         }
 
         /// <summary>
@@ -35,8 +52,33 @@ namespace Calais
             if (query.Filters == null || query.Filters.Count == 0)
                 return source;
 
-            var filterExpression = _expressionBuilder.BuildFilterExpression<TEntity>(query.Filters);
-            return filterExpression != null ? source.Where(filterExpression) : source;
+            foreach (var filter in query.Filters)
+            {
+                if (filter.IsOrGroup)
+                {
+                    var sanitizedFilter = RemoveCustomFiltersFromOrGroup<TEntity>(filter);
+                    if (sanitizedFilter == null)
+                        continue;
+
+                    var orFilterExpression = _expressionBuilder.BuildFilterExpression<TEntity>([sanitizedFilter]);
+                    if (orFilterExpression != null)
+                        source = source.Where(orFilterExpression);
+
+                    continue;
+                }
+
+                if (_customMethodInvoker.TryApplyFilter(source, filter, out var customFilteredSource))
+                {
+                    source = customFilteredSource;
+                    continue;
+                }
+
+                var filterExpression = _expressionBuilder.BuildFilterExpression<TEntity>([filter]);
+                if (filterExpression != null)
+                    source = source.Where(filterExpression);
+            }
+
+            return source;
         }
 
         /// <summary>
@@ -145,6 +187,46 @@ namespace Calais
         {
             source = ApplyFilters(source, query);
             return await source.CountAsync(cancellationToken);
+        }
+
+        private FilterDescriptor? RemoveCustomFiltersFromOrGroup<TEntity>(
+            FilterDescriptor filter) where TEntity : class
+        {
+            if (!filter.IsOrGroup)
+            {
+                if (!_customMethodInvoker.HasCustomFilter<TEntity>(filter, out var invalid))
+                    return filter;
+
+                if (_options.ThrowOnInvalidFields)
+                {
+                    throw new ExpressionBuildException(
+                        invalid
+                            ? $"Custom filter method '{filter.Field}' cannot be used in an OR group because it is incompatible or ambiguous."
+                            : $"Custom filter method '{filter.Field}' cannot be used in an OR group.");
+                }
+
+                return null;
+            }
+
+            var sanitizedOrFilters = new List<FilterDescriptor>();
+            foreach (var orFilter in filter.Or!)
+            {
+                var sanitized = RemoveCustomFiltersFromOrGroup<TEntity>(orFilter);
+                if (sanitized != null)
+                    sanitizedOrFilters.Add(sanitized);
+            }
+
+            if (sanitizedOrFilters.Count == 0)
+                return null;
+
+            return new FilterDescriptor { Or = sanitizedOrFilters };
+        }
+
+        private sealed class EmptyServiceProvider : IServiceProvider
+        {
+            public static readonly EmptyServiceProvider Instance = new EmptyServiceProvider();
+
+            public object? GetService(Type serviceType) => null;
         }
     }
 }

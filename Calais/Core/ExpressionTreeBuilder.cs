@@ -169,12 +169,6 @@ namespace Calais.Core
 		            : null;
             }
 
-            // Check for custom filter
-            if (entityConfig?.CustomFilters.TryGetValue(filter.Field!, out var customFilter) == true)
-            {
-                return RebindExpression(customFilter, parameter);
-            }
-
             return BuildPropertyFilterExpression<TEntity>(filter, parameter);
         }
 
@@ -776,19 +770,5 @@ namespace Calais.Core
             return propInfo != null ? Expression.Property(parameter, propInfo) : null;
         }
 
-        private static Expression RebindExpression(LambdaExpression expression, ParameterExpression newParameter)
-        {
-            var replacer = new ParameterReplacer(expression.Parameters[0], newParameter);
-            return replacer.Visit(expression.Body);
-        }
-
-        private class ParameterReplacer(ParameterExpression oldParameter, ParameterExpression newParameter)
-	        : ExpressionVisitor
-        {
-	        protected override Expression VisitParameter(ParameterExpression node)
-            {
-                return node == oldParameter ? newParameter : base.VisitParameter(node);
-            }
-        }
     }
 }
