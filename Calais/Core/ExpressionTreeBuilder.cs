@@ -5,6 +5,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
@@ -20,19 +21,27 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 {
 	private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(
 		nameof(string.Contains),
-		new[] { typeof(string) }
+		[typeof(string)]
 	)!;
 	private static readonly MethodInfo StringStartsWithMethod = typeof(string).GetMethod(
 		nameof(string.StartsWith),
-		new[] { typeof(string) }
+		[typeof(string)]
 	)!;
 	private static readonly MethodInfo StringEndsWithMethod = typeof(string).GetMethod(
 		nameof(string.EndsWith),
-		new[] { typeof(string) }
+		[typeof(string)]
 	)!;
 	private static readonly MethodInfo StringToLowerMethod = typeof(string).GetMethod(
 		nameof(string.ToLower),
 		Type.EmptyTypes
+	)!;
+	private static readonly MethodInfo RegexIsMatchMethod = typeof(Regex).GetMethod(
+		name: nameof(Regex.IsMatch),
+		[typeof(string), typeof(string)]
+	)!;
+	private static readonly MethodInfo RegexIsMatchIgnoreCaseMethod = typeof(Regex).GetMethod(
+		name: nameof(Regex.IsMatch),
+		[typeof(string), typeof(string), typeof(RegexOptions)]
 	)!;
 	private static readonly MethodInfo EnumerableCountMethod = typeof(Enumerable)
 		.GetMethods()
@@ -654,7 +663,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		object value
 	)
 	{
-		var isIgnoreCase = op.EndsWith("*");
+		var isIgnoreCase = op.EndsWith('*');
 		var baseOp = isIgnoreCase ? op.TrimEnd('*') : op;
 
 		// Check if property is an array/collection for contains operators
@@ -715,6 +724,14 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 			"!@=" => BuildStringMethodCall(left, right, StringContainsMethod, true),
 			"!_=" => BuildStringMethodCall(left, right, StringStartsWithMethod, true),
 			"!_-=" => BuildStringMethodCall(left, right, StringEndsWithMethod, true),
+			"~=" when property.Type == typeof(string) => isIgnoreCase
+				? Expression.Call(
+					RegexIsMatchIgnoreCaseMethod,
+					property,
+					valueExpr,
+					Expression.Constant(RegexOptions.IgnoreCase)
+				)
+				: Expression.Call(RegexIsMatchMethod, property, valueExpr),
 			_ => null,
 		};
 	}

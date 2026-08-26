@@ -108,6 +108,8 @@ var paged = processor.ApplyPagination(sorted, query);
 | `==*` | Equals (case insensitive) |
 | `!=*` | Not equals (case insensitive) |
 | `@=*` | Contains (case insensitive) |
+| `~=` | Matches regular expression |
+| `~=*` | Matches regular expression (case insensitive) |
 | `_=*` | Starts with (case insensitive) |
 | `_-=*` | Ends with (case insensitive) |
 | `len==` | Length equals |

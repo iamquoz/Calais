@@ -218,6 +218,57 @@ public class BasicFilterTests
 	}
 
 	[Fact]
+	public async Task Filter_RegexMatch_MatchesPattern()
+	{
+		await using var context = _fixture.CreateContext();
+
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "name",
+					Operator = "~=",
+					Values = ["^(alice|eve)$"],
+				},
+			],
+		};
+
+		var result = await _processor
+			.ApplyFilters(context.Users, query)
+			.OrderBy(u => u.Name)
+			.ToListAsync(TestContext.Current.CancellationToken);
+
+		result.Select(u => u.Name).Should().Equal("alice", "eve");
+	}
+
+	[Fact]
+	public async Task Filter_RegexMatchIgnoreCase_MatchesPattern()
+	{
+		await using var context = _fixture.CreateContext();
+
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "name",
+					Operator = "~=*",
+					Values = ["^ALICE$"],
+				},
+			],
+		};
+
+		var result = await _processor
+			.ApplyFilters(context.Users, query)
+			.ToListAsync(TestContext.Current.CancellationToken);
+
+		result.Select(u => u.Name).Should().Equal("alice");
+	}
+
+	[Fact]
 	public async Task IgnoredField_IsNotFilterable()
 	{
 		await using var context = _fixture.CreateContext();

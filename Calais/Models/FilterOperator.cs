@@ -81,6 +81,16 @@ public static class FilterOperator
 	public const string ContainsIgnoreCase = "@=*";
 
 	/// <summary>
+	/// Regular-expression match comparison.
+	/// </summary>
+	public const string RegexMatch = "~=";
+
+	/// <summary>
+	/// Case-insensitive regular-expression match comparison.
+	/// </summary>
+	public const string RegexMatchIgnoreCase = "~=*";
+
+	/// <summary>
 	/// Case-insensitive starts-with comparison.
 	/// </summary>
 	public const string StartsWithIgnoreCase = "_=*";
