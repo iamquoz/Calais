@@ -79,6 +79,43 @@ public class JsonFilterTests
 	}
 
 	[Fact]
+	public async Task Filter_Nested_JsonProperty_Contains_MatchesValue()
+	{
+		await using var context = _fixture.CreateContext();
+
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new FilterDescriptor
+				{
+					Field = "Post.User.jsonbColumn.city",
+					IsJson = true,
+					Operator = "@=*",
+					Values = ["osc"],
+				},
+			],
+			Sorts =
+			[
+				new SortDescriptor
+				{
+					Field = "Post.user.Name",
+					Direction = nameof(SortDirection.Asc),
+				},
+			],
+		};
+
+		var source = context.Comments.Include(c => c.Post).ThenInclude(p => p.User);
+
+		var result = await _processor
+			.ApplyFilters(source, query)
+			.ToListAsync(TestContext.Current.CancellationToken);
+
+		result.Should().HaveCount(3);
+		result.Select(c => c.Post.User.Name).Should().BeEquivalentTo("bob", "alice", "alice");
+	}
+
+	[Fact]
 	public async Task Sort_JsonProperty_SortsCorrectly()
 	{
 		await using var context = _fixture.CreateContext();
@@ -103,5 +140,33 @@ public class JsonFilterTests
 			.ToListAsync(TestContext.Current.CancellationToken);
 
 		result.Should().HaveCount(3);
+	}
+
+	[Fact]
+	public async Task Sort_Nested_JsonProperty_SortsCorrectly()
+	{
+		await using var context = _fixture.CreateContext();
+
+		var query = new CalaisQuery
+		{
+			Sorts =
+			[
+				new SortDescriptor
+				{
+					Field = "Post.User.jsonbColumn.city",
+					Direction = nameof(SortDirection.Asc),
+					IsJson = true,
+				},
+			],
+		};
+
+		var source = context.Comments.Include(c => c.Post).ThenInclude(p => p.User);
+
+		var result = await _processor
+			.ApplySorting(source, query)
+			.ToListAsync(TestContext.Current.CancellationToken);
+
+		result.Should().HaveCount(3);
+		result.Select(c => c.Post.User.Name).Should().BeEquivalentTo("alice", "alice", "bob");
 	}
 }
