@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
 
 namespace Calais.Tests.TestEntities;

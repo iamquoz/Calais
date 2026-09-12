@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
@@ -235,44 +236,91 @@ public class SortExpressionBuilder
 	{
 		var parts = sort.Field.Split('.');
 		if (parts.Length < 2)
-		{
-			if (_options.ThrowOnInvalidFields)
-				throw new InvalidJsonPathException(sort.Field);
-			return orderedQuery;
-		}
+			return _options.ThrowOnInvalidFields
+				? throw new InvalidJsonPathException(sort.Field)
+				: orderedQuery;
 
 		var parameter = Expression.Parameter(typeof(TEntity), "x");
-		var jsonProp = typeof(TEntity).GetProperty(
-			parts[0],
-			BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
-		);
 
-		if (jsonProp == null)
+		var propType = typeof(TEntity);
+		Expression jsonExpr = parameter;
+		int index;
+		// Get the JsonDocument, JsonElement or JsonNode property
+		for (index = 0; index < parts.Length; index++)
 		{
-			if (_options.ThrowOnInvalidFields)
-				throw new PropertyNotFoundException(parts[0], typeof(TEntity));
-			return orderedQuery;
+			var prop = propType.GetProperty(
+				parts[index],
+				BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+			);
+			if (prop == null)
+				return _options.ThrowOnInvalidFields
+					? throw new PropertyNotFoundException(parts[index], propType)
+					: null;
+
+			jsonExpr = Expression.Property(jsonExpr, prop);
+			propType = prop.PropertyType;
+			if (
+				propType.IsAssignableTo(typeof(JsonDocument))
+				|| propType.IsAssignableTo(typeof(JsonElement))
+				|| propType.IsAssignableTo(typeof(JsonNode))
+			)
+			{
+				break;
+			}
 		}
 
-		Expression jsonExpr = Expression.Property(parameter, jsonProp);
-
-		if (jsonProp.PropertyType == typeof(JsonDocument))
+		Expression stringExpr;
+		if (propType.IsAssignableTo(typeof(JsonNode)))
 		{
-			var rootElementProp = typeof(JsonDocument).GetProperty("RootElement")!;
-			jsonExpr = Expression.Property(jsonExpr, rootElementProp);
-		}
+			// Navigate nested JSON properties or indexes
+			var getPropertyMethod = typeof(JsonNode).GetMethod("get_Item", [typeof(string)])!;
+			var getIndexMethod = typeof(JsonNode).GetMethod("get_Item", [typeof(int)])!;
 
-		var getPropertyMethod = typeof(JsonElement).GetMethod(
-			"GetProperty",
-			new[] { typeof(string) }
-		)!;
-		for (int i = 1; i < parts.Length; i++)
+			for (index++; index < parts.Length; index++)
+			{
+				if (int.TryParse(parts[index], out var i))
+				{
+					jsonExpr = Expression.Call(jsonExpr, getIndexMethod, Expression.Constant(i));
+				}
+				else
+				{
+					jsonExpr = Expression.Call(
+						jsonExpr,
+						getPropertyMethod,
+						Expression.Constant(parts[i])
+					);
+				}
+			}
+
+			// Get string value for comparison
+			var toStringMethod = typeof(JsonNode).GetMethod("ToString")!;
+			stringExpr = Expression.Call(jsonExpr, toStringMethod);
+		}
+		else
 		{
-			jsonExpr = Expression.Call(jsonExpr, getPropertyMethod, Expression.Constant(parts[i]));
-		}
+			// Navigate through JSON path: JsonDocument.RootElement.GetProperty("path")
+			if (propType.IsAssignableTo(typeof(JsonDocument)))
+			{
+				// Access RootElement
+				var rootElementProp = typeof(JsonDocument).GetProperty("RootElement")!;
+				jsonExpr = Expression.Property(jsonExpr, rootElementProp);
+			}
 
-		var getStringMethod = typeof(JsonElement).GetMethod("GetString")!;
-		var stringExpr = Expression.Call(jsonExpr, getStringMethod);
+			// Navigate nested JSON properties
+			var getPropertyMethod = typeof(JsonElement).GetMethod("GetProperty", [typeof(string)])!;
+			for (index++; index < parts.Length; index++)
+			{
+				jsonExpr = Expression.Call(
+					jsonExpr,
+					getPropertyMethod,
+					Expression.Constant(parts[index])
+				);
+			}
+
+			// Get string value for comparison
+			var getStringMethod = typeof(JsonElement).GetMethod("GetString")!;
+			stringExpr = Expression.Call(jsonExpr, getStringMethod);
+		}
 
 		var lambda = Expression.Lambda(stringExpr, parameter);
 		var isFirst = query != null;

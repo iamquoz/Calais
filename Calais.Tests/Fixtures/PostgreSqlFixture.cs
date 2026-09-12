@@ -57,7 +57,9 @@ public class PostgreSqlFixture : IAsyncLifetime
 			BirthDate = new DateOnly(1999, 3, 15),
 			PreferredContactTime = new TimeOnly(9, 0),
 			SessionDuration = TimeSpan.FromHours(2),
-			JsonbColumn = JsonDocument.Parse("{\"randomData\": \"tagged\", \"score\": 100}"),
+			JsonbColumn = JsonDocument.Parse(
+				"{\"randomData\": \"tagged\", \"score\": 100, \"city\": \"Moscow\"}"
+			),
 		};
 
 		var user2 = new User
@@ -73,7 +75,9 @@ public class PostgreSqlFixture : IAsyncLifetime
 			PreferredContactTime = new TimeOnly(14, 30),
 			SessionDuration = TimeSpan.FromMinutes(90),
 			LockoutEnd = DateTimeOffset.UtcNow.AddDays(1),
-			JsonbColumn = JsonDocument.Parse("{\"randomData\": \"other\", \"score\": 50}"),
+			JsonbColumn = JsonDocument.Parse(
+				"{\"randomData\": \"other\", \"score\": 50, \"city\": \"Osco\"}"
+			),
 		};
 
 		var user3 = new User
