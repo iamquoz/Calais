@@ -123,7 +123,7 @@ var paged = processor.ApplyPagination(sorted, query);
 
 When multiple values are provided for a filter:
 - For `==` and similar operators: treated as **OR** (matches any)
-- For `!=`: treated as **AND** (must not match any)
+- For negated operators (`!=`, `!@=`, `!_=`, `!_-=`, `len!=`, and case-insensitive variants): treated as **AND** (must not match any)
 
 ```json
 {

@@ -252,36 +252,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		if (filter.Values == null || filter.Values.Count == 0)
 			return null;
 
-		// For != operator with multiple values, use AND (must not match any)
-		// For other operators with multiple values, use OR (must match at least one)
-		var useAnd = filter.Operator is "!=" or "!=*";
-
-		Expression? valueExpression = null;
-		foreach (var value in filter.Values)
-		{
-			var singleValueExpr = BuildComparisonExpression(
-				property,
-				filter.Operator ?? "==",
-				value
-			);
-			if (singleValueExpr != null)
-			{
-				if (valueExpression == null)
-				{
-					valueExpression = singleValueExpr;
-				}
-				else if (useAnd)
-				{
-					valueExpression = Expression.AndAlso(valueExpression, singleValueExpr);
-				}
-				else
-				{
-					valueExpression = Expression.OrElse(valueExpression, singleValueExpr);
-				}
-			}
-		}
-
-		return valueExpression;
+		return BuildValuesExpression(property, filter.Operator ?? "==", filter.Values);
 	}
 
 	private Expression? BuildNestedFilterExpression<TEntity>(
@@ -337,7 +308,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		{
 			return filter.IsVector
 				? BuildVectorMatchExpression(propertyExpression, filter.Values!)
-				: BuildValuesOrExpression(
+				: BuildValuesExpression(
 					propertyExpression,
 					filter.Operator ?? "==",
 					filter.Values!
@@ -621,7 +592,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 			stringExpr = Expression.Call(jsonExpr, getStringMethod);
 		}
 
-		return BuildValuesOrExpression(stringExpr, filter.Operator ?? "==", filter.Values!);
+		return BuildValuesExpression(stringExpr, filter.Operator ?? "==", filter.Values!);
 	}
 
 	private Expression? BuildLengthExpression<TEntity>(
@@ -667,34 +638,26 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		if (filter.Values == null || filter.Values.Count == 0)
 			return null;
 
-		var value = ConvertValue(filter.Values[0], typeof(int));
-		var valueExpr = Expression.Constant(value);
-
-		return op switch
-		{
-			"==" => Expression.Equal(lengthExpr, valueExpr),
-			"!=" => Expression.NotEqual(lengthExpr, valueExpr),
-			">" => Expression.GreaterThan(lengthExpr, valueExpr),
-			"<" => Expression.LessThan(lengthExpr, valueExpr),
-			">=" => Expression.GreaterThanOrEqual(lengthExpr, valueExpr),
-			"<=" => Expression.LessThanOrEqual(lengthExpr, valueExpr),
-			_ => null,
-		};
+		return BuildValuesExpression(lengthExpr, op, filter.Values);
 	}
 
-	private static Expression? BuildValuesOrExpression(
+	private static Expression? BuildValuesExpression(
 		Expression property,
 		string op,
 		List<object> values
 	)
 	{
+		var useAnd = op.TrimEnd('*') is "!=" or "!@=" or "!_=" or "!_-=";
 		Expression? result = null;
 		foreach (var value in values)
 		{
 			var comparison = BuildComparisonExpression(property, op, value);
 			if (comparison != null)
 			{
-				result = result == null ? comparison : Expression.OrElse(result, comparison);
+				result =
+					result == null ? comparison
+					: useAnd ? Expression.AndAlso(result, comparison)
+					: Expression.OrElse(result, comparison);
 			}
 		}
 		return result;
