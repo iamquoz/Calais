@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -11,6 +12,8 @@ using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Query;
 using NpgsqlTypes;
 
 namespace Calais.Core;
@@ -20,6 +23,23 @@ namespace Calais.Core;
 /// </summary>
 public class ExpressionTreeBuilder(CalaisOptions options)
 {
+	private readonly Expression? _querySource;
+	private IModel? _queryModel;
+
+	internal ExpressionTreeBuilder(CalaisOptions options, Expression querySource)
+		: this(options)
+	{
+		_querySource = querySource;
+	}
+
+	private static readonly ConditionalWeakTable<Type, Type[]> DerivedTypes = new();
+	private static readonly ConditionalWeakTable<
+		Type,
+		Func<object, Expression>
+	> ParameterFactories = new();
+	private static readonly MethodInfo CaptureParameterMethod = (
+		(Func<object, Expression>)CaptureParameter<object>
+	).Method.GetGenericMethodDefinition();
 	private static readonly MethodInfo StringContainsMethod = typeof(string).GetMethod(
 		nameof(string.Contains),
 		[typeof(string)]
@@ -47,6 +67,9 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 	private static readonly MethodInfo EnumerableCountMethod = typeof(Enumerable)
 		.GetMethods()
 		.First(m => m.Name == nameof(Enumerable.Count) && m.GetParameters().Length == 1);
+	private static readonly MethodInfo EnumerableAnyWithoutPredicateMethod = (
+		(Func<IEnumerable<object>, bool>)Enumerable.Any
+	).Method.GetGenericMethodDefinition();
 	private static readonly MethodInfo EnumerableAnyMethod = typeof(Enumerable)
 		.GetMethods()
 		.First(m => m.Name == nameof(Enumerable.Any) && m.GetParameters().Length == 2);
@@ -54,73 +77,21 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		.GetMethods()
 		.First(m => m.Name == nameof(Enumerable.Contains) && m.GetParameters().Length == 2);
 
-	// NpgsqlFullTextSearchLinqExtensions.Matches(NpgsqlTsVector, NpgsqlTsQuery) extension method
-	private static readonly MethodInfo TsVectorMatchesMethod = GetTsVectorMatchesMethod();
-
-	// NpgsqlFullTextSearchDbFunctionsExtensions.ToTsQuery(DbFunctions, string config, string query)
-	private static readonly MethodInfo ToTsQueryMethod = GetToTsQueryMethod();
-
-	private static MethodInfo GetTsVectorMatchesMethod()
-	{
-		try
-		{
-			var assembly = Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL");
-			var extensionType = assembly
-				.GetTypes()
-				.FirstOrDefault(t => t.Name == "NpgsqlFullTextSearchLinqExtensions");
-
-			if (extensionType != null)
-			{
-				// Matches(NpgsqlTsVector, NpgsqlTsQuery)
-				var method = extensionType.GetMethod(
-					"Matches",
-					BindingFlags.Public | BindingFlags.Static,
-					null,
-					[typeof(NpgsqlTsVector), typeof(NpgsqlTsQuery)],
-					null
-				);
-				if (method != null)
-					return method;
-			}
-		}
-		catch
-		{
-			// Ignore assembly loading errors
-		}
-
-		return null!;
-	}
-
-	private static MethodInfo GetToTsQueryMethod()
-	{
-		try
-		{
-			var assembly = Assembly.Load("Npgsql.EntityFrameworkCore.PostgreSQL");
-			var extensionType = assembly
-				.GetTypes()
-				.FirstOrDefault(t => t.Name == "NpgsqlFullTextSearchDbFunctionsExtensions");
-
-			if (extensionType != null)
-			{
-				// ToTsQuery(DbFunctions, string, string)
-				var method = extensionType.GetMethod(
-					"ToTsQuery",
-					BindingFlags.Public | BindingFlags.Static,
-					null,
-					[typeof(DbFunctions), typeof(string), typeof(string)],
-					null
-				);
-				if (method != null)
-					return method;
-			}
-		}
-		catch
-		{
-			// Ignore assembly loading errors
-		}
-
-		return null!;
-	}
+	private static readonly MethodInfo TsVectorMatchesMethod = (
+		(Func<NpgsqlTsVector, NpgsqlTsQuery, bool>)NpgsqlFullTextSearchLinqExtensions.Matches
+	).Method;
+	private static readonly MethodInfo TsQueryOrMethod = (
+		(Func<NpgsqlTsQuery, NpgsqlTsQuery, NpgsqlTsQuery>)NpgsqlFullTextSearchLinqExtensions.Or
+	).Method;
+	private static readonly MemberExpression EfFunctions = Expression.Property(
+		null,
+		typeof(EF),
+		nameof(EF.Functions)
+	);
+	private static readonly MethodInfo ToTsQueryMethod = (
+		(Func<DbFunctions, string, string, NpgsqlTsQuery>)
+			NpgsqlFullTextSearchDbFunctionsExtensions.ToTsQuery
+	).Method;
 
 	/// <summary>
 	/// Builds a filter expression from filter descriptors
@@ -285,10 +256,11 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		Expression currentExpression,
 		string[] pathParts,
 		int partIndex,
-		FilterDescriptor filter
+		FilterDescriptor filter,
+		PropertyInfo? property = null
 	)
 	{
-		var property = currentType.GetProperty(
+		property ??= currentType.GetProperty(
 			pathParts[partIndex],
 			BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
 		);
@@ -355,18 +327,19 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		FilterDescriptor filter
 	)
 	{
-		var derivedTypes = GetDerivedTypesWithProperty(currentType, pathParts[partIndex]).ToList();
-
-		if (derivedTypes.Count == 0)
-		{
-			if (options.ThrowOnInvalidFields)
-				throw new PropertyNotFoundException(pathParts[partIndex], currentType);
-			return null;
-		}
-
+		var baseEntity = (_queryModel ??= FindQueryModel(_querySource))?.FindEntityType(
+			currentType
+		);
+		var propertyName = pathParts[partIndex];
+		var candidates =
+			baseEntity == null
+				? GetDerivedTypesWithProperty(currentType, propertyName)
+				: GetMappedDerivedTypesWithProperty(baseEntity, propertyName);
 		Expression? result = null;
-		foreach (var derivedType in derivedTypes)
+		var foundProperty = false;
+		foreach (var (derivedType, property) in candidates)
 		{
+			foundProperty = true;
 			var typeCheck = Expression.TypeIs(currentExpression, derivedType);
 			var convertedExpression = Expression.Convert(currentExpression, derivedType);
 			var derivedExpression = BuildPathFilterExpression(
@@ -374,7 +347,8 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 				convertedExpression,
 				pathParts,
 				partIndex,
-				filter
+				filter,
+				property
 			);
 
 			if (derivedExpression == null)
@@ -385,22 +359,94 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 				result == null ? guardedExpression : Expression.OrElse(result, guardedExpression);
 		}
 
+		if (!foundProperty)
+		{
+			if (baseEntity != null)
+			{
+				// A valid filter confined to unmapped subclasses cannot match a database row.
+				var clrFilter = new ExpressionTreeBuilder(
+					options
+				).BuildDerivedTypePathFilterExpression(
+					currentType,
+					currentExpression,
+					pathParts,
+					partIndex,
+					filter
+				);
+				return clrFilter == null ? null : Expression.Constant(false);
+			}
+			if (options.ThrowOnInvalidFields)
+				throw new PropertyNotFoundException(propertyName, currentType);
+		}
+
 		return result;
 	}
 
-	private static IEnumerable<Type> GetDerivedTypesWithProperty(Type baseType, string propertyName)
+	private static IModel? FindQueryModel(Expression? source)
 	{
-		return baseType
-			.Assembly.GetTypes()
-			.Where(type =>
-				type != baseType
-				&& baseType.IsAssignableFrom(type)
-				&& type.GetProperty(
-					propertyName,
-					BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
-				) != null
-			);
+		if (source is EntityQueryRootExpression root)
+			return root.EntityType.Model;
+		if (source is MethodCallExpression call)
+			foreach (var argument in call.Arguments)
+				if (FindQueryModel(argument) is { } model)
+					return model;
+		return null;
 	}
+
+	private static IEnumerable<(
+		Type DerivedType,
+		PropertyInfo Property
+	)> GetMappedDerivedTypesWithProperty(IEntityType baseEntity, string propertyName)
+	{
+		foreach (var entity in baseEntity.GetDerivedTypes())
+		{
+			var property = entity.ClrType.GetProperty(
+				propertyName,
+				BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+			);
+			if (
+				property != null
+				&& entity.FindMember(property.Name) is { PropertyInfo: { } mappedProperty } member
+				&& member.DeclaringType == entity
+			)
+				yield return (entity.ClrType, mappedProperty);
+		}
+	}
+
+	private static IEnumerable<(
+		Type DerivedType,
+		PropertyInfo Property
+	)> GetDerivedTypesWithProperty(Type baseType, string propertyName)
+	{
+		if (baseType.IsSealed)
+			yield break;
+
+		// Emitted assemblies can acquire new subclasses between requests.
+		var types = baseType.Assembly.IsDynamic
+			? FindDerivedTypes(baseType)
+			: DerivedTypes.GetValue(baseType, FindDerivedTypes);
+		foreach (var type in types)
+		{
+			var property = type.GetProperty(
+				propertyName,
+				BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase
+			);
+			if (property == null)
+				continue;
+
+			// The declaring type's branch already covers descendants inheriting this property.
+			if (property.DeclaringType != type && types.Contains(property.DeclaringType))
+				continue;
+
+			yield return (type, property);
+		}
+	}
+
+	private static Type[] FindDerivedTypes(Type baseType) =>
+		baseType
+			.Assembly.GetTypes()
+			.Where(t => t != baseType && baseType.IsAssignableFrom(t))
+			.ToArray();
 
 	private static bool TryGetEnumerableElementType(Type type, out Type elementType)
 	{
@@ -461,44 +507,30 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		if (values == null || values.Count == 0)
 			return null;
 
-		// Use pattern: Vector.Matches(EF.Functions.ToTsQuery("language", "query"))
-		// This is properly translated by Npgsql EF Core provider
-
-		if (TsVectorMatchesMethod == null || ToTsQueryMethod == null)
-			return null;
-
-		var language = options.DefaultVectorLanguage;
-
-		// EF.Functions property access
-		var efFunctionsProperty = typeof(EF).GetProperty(
-			nameof(EF.Functions),
-			BindingFlags.Public | BindingFlags.Static
-		)!;
-		var efFunctionsExpr = Expression.Property(null, efFunctionsProperty);
-
-		Expression? orExpr = null;
+		var language = Expression.Constant(options.DefaultVectorLanguage);
+		Expression? combinedQuery = null;
 		foreach (var value in values)
 		{
 			var tsQueryValue = value?.ToString();
 			if (string.IsNullOrEmpty(tsQueryValue))
 				continue;
 
-			// Create: EF.Functions.ToTsQuery(language, tsQueryValue)
-			var toTsQueryExpr = Expression.Call(
+			var query = Expression.Call(
 				ToTsQueryMethod,
-				efFunctionsExpr,
-				Expression.Constant(language),
-				Expression.Constant(tsQueryValue)
+				EfFunctions,
+				language,
+				FilterValue(tsQueryValue, typeof(string))
 			);
 
-			// Create: NpgsqlFullTextSearchLinqExtensions.Matches(vectorProperty, toTsQueryExpr)
-			// Since Matches is a static extension method, we use Expression.Call with the static method
-			var matchExpr = Expression.Call(TsVectorMatchesMethod, vectorProperty, toTsQueryExpr);
-
-			orExpr = orExpr == null ? (Expression)matchExpr : Expression.OrElse(orExpr, matchExpr);
+			combinedQuery =
+				combinedQuery == null
+					? query
+					: Expression.Call(TsQueryOrMethod, combinedQuery, query);
 		}
 
-		return orExpr;
+		return combinedQuery == null
+			? null
+			: Expression.Call(TsVectorMatchesMethod, vectorProperty, combinedQuery);
 	}
 
 	private Expression? BuildJsonFilterExpression<TEntity>(
@@ -611,34 +643,26 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 			return null;
 		}
 
-		var propExpr = Expression.Property(parameter, propInfo);
-		Expression lengthExpr;
-
-		if (propInfo.PropertyType == typeof(string))
-		{
-			lengthExpr = Expression.Property(propExpr, "Length");
-		}
-		else if (
-			typeof(IEnumerable).IsAssignableFrom(propInfo.PropertyType)
-			&& propInfo.PropertyType != typeof(string)
-		)
-		{
-			var elementType = propInfo.PropertyType.IsGenericType
-				? propInfo.PropertyType.GetGenericArguments()[0]
-				: typeof(object);
-			var countMethod = EnumerableCountMethod.MakeGenericMethod(elementType);
-			lengthExpr = Expression.Call(countMethod, propExpr);
-		}
-		else
-		{
-			return null;
-		}
-
-		var op = filter.Operator!.Substring(3); // Remove "len" prefix
 		if (filter.Values == null || filter.Values.Count == 0)
 			return null;
 
-		return BuildValuesExpression(lengthExpr, op, filter.Values);
+		var op = filter.Operator![3..];
+		var propExpr = Expression.Property(parameter, propInfo);
+		if (propInfo.PropertyType == typeof(string))
+			return BuildValuesExpression(
+				Expression.Property(propExpr, "Length"),
+				op,
+				filter.Values
+			);
+
+		if (!typeof(IEnumerable).IsAssignableFrom(propInfo.PropertyType))
+			return null;
+
+		var elementType = propInfo.PropertyType.IsGenericType
+			? propInfo.PropertyType.GetGenericArguments()[0]
+			: typeof(object);
+		var count = Expression.Call(EnumerableCountMethod.MakeGenericMethod(elementType), propExpr);
+		return BuildValuesExpression(count, op, filter.Values);
 	}
 
 	private static Expression? BuildValuesExpression(
@@ -647,6 +671,36 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		List<object> values
 	)
 	{
+		var type = Nullable.GetUnderlyingType(property.Type) ?? property.Type;
+		// For these keys Enumerable.Contains has the same equality semantics as ==.
+		if (
+			values.Count > 1
+			&& op is "==" or "!="
+			&& (
+				type == typeof(string)
+				|| type == typeof(Guid)
+				|| Type.GetTypeCode(type) is >= TypeCode.Boolean and <= TypeCode.UInt64
+			)
+			&& !values.Contains(null!)
+		)
+		{
+			var keys = Array.CreateInstance(property.Type, values.Count);
+			for (var i = 0; i < values.Count; i++)
+			{
+				var key = ConvertValue(values[i], property.Type);
+				if (!property.Type.IsInstanceOfType(key))
+					throw new ArgumentException($"Invalid filter value for {property.Type}.");
+				keys.SetValue(key, i);
+			}
+
+			var contains = Expression.Call(
+				EnumerableContainsMethod.MakeGenericMethod(property.Type),
+				FilterValue(keys, keys.GetType()),
+				property
+			);
+			return op == "!=" ? Expression.Not(contains) : contains;
+		}
+
 		var useAnd = op.TrimEnd('*') is "!=" or "!@=" or "!_=" or "!_-=";
 		Expression? result = null;
 		foreach (var value in values)
@@ -693,7 +747,18 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		)
 			return null;
 
-		var valueExpr = Expression.Constant(convertedValue, property.Type);
+		if (
+			property is MethodCallExpression { Method.Name: nameof(Enumerable.Count) } count
+			&& ((baseOp == ">" && convertedValue is 0) || (baseOp == ">=" && convertedValue is 1))
+		)
+			return Expression.Call(
+				EnumerableAnyWithoutPredicateMethod.MakeGenericMethod(
+					count.Method.GetGenericArguments()
+				),
+				count.Arguments[0]
+			);
+
+		var valueExpr = FilterValue(convertedValue, property.Type);
 
 		Expression left = property;
 		Expression right = valueExpr;
@@ -710,10 +775,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		{
 			var underlyingType = Enum.GetUnderlyingType(propertyType);
 			left = Expression.Convert(property, underlyingType);
-			right = Expression.Constant(
-				Convert.ChangeType(convertedValue, underlyingType),
-				underlyingType
-			);
+			right = FilterValue(Convert.ChangeType(convertedValue, underlyingType), underlyingType);
 		}
 
 		return baseOp switch
@@ -778,7 +840,7 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 		)
 			return null;
 
-		var valueExpr = Expression.Constant(convertedValue, elementType);
+		var valueExpr = FilterValue(convertedValue, elementType);
 
 		// Build Enumerable.Contains(array, value)
 		var containsMethod = EnumerableContainsMethod.MakeGenericMethod(elementType);
@@ -805,6 +867,25 @@ public class ExpressionTreeBuilder(CalaisOptions options)
 			return Expression.Not(call);
 		}
 		return call;
+	}
+
+	private static Expression FilterValue(object? value, Type type)
+	{
+		if (value == null || !type.IsInstanceOfType(value))
+			return Expression.Constant(value, type);
+
+		var capture = ParameterFactories.GetValue(type, static t =>
+			CaptureParameterMethod.MakeGenericMethod(t).CreateDelegate<Func<object, Expression>>()
+		);
+		return capture(value);
+	}
+
+	private static Expression CaptureParameter<T>(object value)
+	{
+		// A typed closure lets EF read the parameter directly, including nullable values and arrays.
+		var parameter = (T)value;
+		Expression<Func<T>> captured = () => parameter;
+		return captured.Body;
 	}
 
 	private static object? ConvertValue(object value, Type targetType)

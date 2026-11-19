@@ -45,8 +45,9 @@ public class CustomMethodAndDefaultSortTests
 	[Fact]
 	public void CustomFilter_CanUseScopedConstructorInjection()
 	{
-		var services = new ServiceCollection()
-			.AddScoped(_ => new AgeLimitService(30))
+		var minimumAge = 30;
+		using var services = new ServiceCollection()
+			.AddScoped(_ => new AgeLimitService(minimumAge))
 			.AddScoped<ICalaisCustomFilterMethods, InjectedFilterMethods>()
 			.AddCalais()
 			.BuildServiceProvider();
@@ -69,6 +70,15 @@ public class CustomMethodAndDefaultSortTests
 		var result = processor.ApplyFilters(SampleUsers().AsQueryable(), query).ToList();
 
 		result.Select(u => u.Name).Should().Equal("bob", "charlie");
+
+		minimumAge = 35;
+		using var nextScope = services.CreateScope();
+		var nextProcessor = nextScope.ServiceProvider.GetRequiredService<CalaisProcessor>();
+		nextProcessor
+			.ApplyFilters(SampleUsers().AsQueryable(), query)
+			.Select(u => u.Name)
+			.Should()
+			.Equal("charlie");
 	}
 
 	[Fact]
@@ -368,8 +378,9 @@ public class CustomMethodAndDefaultSortTests
 			CalaisFilterContext context
 		)
 		{
-			var offset =
-				((AgeOffsetService?)context.Services.GetService(typeof(AgeOffsetService)))?.Offset
+			var offset = (
+				(AgeOffsetService?)context.Services.GetService(typeof(AgeOffsetService))
+			)?.Offset
 				?? 0;
 			var minimumAge = Convert.ToInt32(context.Values[0]) + offset;
 			return source.Where(u => u.Age >= minimumAge);

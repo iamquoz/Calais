@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
@@ -10,6 +11,8 @@ namespace Calais.Core;
 
 internal sealed class CustomMethodInvoker
 {
+	private static readonly ConditionalWeakTable<Type, ILookup<string, MethodInfo>> MethodsByName =
+		new();
 	private readonly CalaisOptions _options;
 	private readonly IServiceProvider _services;
 	private readonly IReadOnlyList<ICalaisCustomFilterMethods> _filterMethods;
@@ -134,31 +137,27 @@ internal sealed class CustomMethodInvoker
 		);
 	}
 
-	private static List<CustomMethodCandidate> FindCandidates<TMethods>(
-		IEnumerable<TMethods> methodServices,
+	private static IReadOnlyList<CustomMethodCandidate> FindCandidates<TMethods>(
+		IReadOnlyList<TMethods> methodServices,
 		string field
 	)
 	{
-		var candidates = new List<CustomMethodCandidate>();
+		List<CustomMethodCandidate>? candidates = null;
 
 		foreach (var methodService in methodServices)
 		{
 			if (methodService == null)
 				continue;
 
-			var methods = methodService
-				.GetType()
-				.GetMethods(BindingFlags.Instance | BindingFlags.Public)
-				.Where(method =>
-					string.Equals(method.Name, field, StringComparison.OrdinalIgnoreCase)
-				);
-
-			candidates.AddRange(
-				methods.Select(method => new CustomMethodCandidate(methodService, method))
+			var methods = MethodsByName.GetValue(methodService.GetType(), static type =>
+				type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+					.ToLookup(method => method.Name, StringComparer.OrdinalIgnoreCase)
 			);
+			foreach (var method in methods[field])
+				(candidates ??= []).Add(new CustomMethodCandidate(methodService, method));
 		}
 
-		return candidates;
+		return candidates is null ? [] : candidates;
 	}
 
 	private static CustomMethodCandidate CloseAndValidate<TEntity>(

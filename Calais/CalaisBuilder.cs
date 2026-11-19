@@ -20,6 +20,7 @@ public class CalaisBuilder
 	/// <summary>
 	/// Sets the maximum allowed page size
 	/// </summary>
+	/// <remarks>With -1, explicit sizes are uncapped and omitting the size returns all matches</remarks>
 	public CalaisBuilder WithMaxPageSize(int maxPageSize)
 	{
 		Options.MaxPageSize = maxPageSize;

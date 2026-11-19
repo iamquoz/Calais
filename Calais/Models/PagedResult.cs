@@ -31,7 +31,7 @@ public class PagedResult<T>
 	/// <summary>
 	/// The total number of available pages.
 	/// </summary>
-	public int TotalPages => PageSize > 0 ? (TotalCount + PageSize - 1) / PageSize : 0;
+	public int TotalPages => PageSize > 0 ? (int)(((long)TotalCount + PageSize - 1) / PageSize) : 0;
 
 	/// <summary>
 	/// Whether a previous page exists.

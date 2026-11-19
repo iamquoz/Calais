@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Calais.Configuration;
 using Calais.Exceptions;
 using Calais.Models;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Calais.Core;
 
@@ -337,14 +338,14 @@ public class SortExpressionBuilder
 		where TEntity : class
 	{
 		var sourceQuery = isFirst ? query! : orderedQuery!;
-		var methodName = isFirst
-			? (direction == SortDirection.Asc ? "OrderBy" : "OrderByDescending")
-			: (direction == SortDirection.Asc ? "ThenBy" : "ThenByDescending");
-
-		var method = typeof(Queryable)
-			.GetMethods()
-			.First(m => m.Name == methodName && m.GetParameters().Length == 2)
-			.MakeGenericMethod(typeof(TEntity), keySelector.ReturnType);
+		var definition = (isFirst, direction) switch
+		{
+			(true, SortDirection.Asc) => QueryableMethods.OrderBy,
+			(true, _) => QueryableMethods.OrderByDescending,
+			(false, SortDirection.Asc) => QueryableMethods.ThenBy,
+			_ => QueryableMethods.ThenByDescending,
+		};
+		var method = definition.MakeGenericMethod(typeof(TEntity), keySelector.ReturnType);
 
 		return (IOrderedQueryable<TEntity>)method.Invoke(null, [sourceQuery, keySelector])!;
 	}
