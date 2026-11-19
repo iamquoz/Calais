@@ -8,6 +8,7 @@ using Calais.Core;
 using Calais.Exceptions;
 using Calais.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Calais;
 
@@ -62,6 +63,7 @@ public class CalaisProcessor
 		if (query.Filters == null || query.Filters.Count == 0)
 			return source;
 
+		var expressionBuilder = GetExpressionBuilder(source);
 		foreach (var filter in query.Filters)
 		{
 			if (filter.IsOrGroup)
@@ -70,11 +72,15 @@ public class CalaisProcessor
 				if (sanitizedFilter == null)
 					continue;
 
-				var orFilterExpression = _expressionBuilder.BuildFilterExpression<TEntity>([
+				var orFilterExpression = expressionBuilder.BuildFilterExpression<TEntity>([
 					sanitizedFilter,
 				]);
 				if (orFilterExpression != null)
+				{
+					if (source.Provider is IAsyncQueryProvider)
+						orFilterExpression = CollectionAnyOptimizer.Combine(orFilterExpression);
 					source = source.Where(orFilterExpression);
+				}
 
 				continue;
 			}
@@ -82,16 +88,22 @@ public class CalaisProcessor
 			if (_customMethodInvoker.TryApplyFilter(source, filter, out var customFilteredSource))
 			{
 				source = customFilteredSource;
+				expressionBuilder = GetExpressionBuilder(source);
 				continue;
 			}
 
-			var filterExpression = _expressionBuilder.BuildFilterExpression<TEntity>([filter]);
+			var filterExpression = expressionBuilder.BuildFilterExpression<TEntity>([filter]);
 			if (filterExpression != null)
 				source = source.Where(filterExpression);
 		}
 
 		return source;
 	}
+
+	private ExpressionTreeBuilder GetExpressionBuilder(IQueryable source) =>
+		source.Provider is IAsyncQueryProvider
+			? new ExpressionTreeBuilder(_options, source.Expression)
+			: _expressionBuilder;
 
 	/// <summary>
 	/// Applies sorting from the query to the source
@@ -109,18 +121,17 @@ public class CalaisProcessor
 		IQueryable<TEntity> source,
 		CalaisQuery query
 	)
-		where TEntity : class
-	{
-		var page = query.Page ?? 1;
-		var pageSize = Math.Min(query.PageSize ?? _options.DefaultPageSize, _options.MaxPageSize);
+		where TEntity : class =>
+		IsUnpaged(query)
+			? source
+			: ApplyPagination(
+				source,
+				query.Page.GetValueOrDefault(),
+				query.PageSize.GetValueOrDefault()
+			);
 
-		if (page < 1)
-			page = 1;
-		if (pageSize < 1)
-			pageSize = _options.DefaultPageSize;
-
-		return source.Skip((page - 1) * pageSize).Take(pageSize);
-	}
+	private bool IsUnpaged(CalaisQuery query) =>
+		_options.MaxPageSize == -1 && query.PageSize == null;
 
 	/// <summary>
 	/// Applies pagination with custom page and pageSize values
@@ -132,13 +143,24 @@ public class CalaisProcessor
 	)
 		where TEntity : class
 	{
-		pageSize = Math.Min(pageSize, _options.MaxPageSize);
-		if (page < 1)
-			page = 1;
-		if (pageSize < 1)
-			pageSize = _options.DefaultPageSize;
+		var (_, size, offset) = GetPage(page, pageSize);
+		if (offset > int.MaxValue)
+			throw new ArgumentOutOfRangeException(
+				nameof(page),
+				page,
+				"The page offset exceeds the range supported by Queryable.Skip."
+			);
 
-		return source.Skip((page - 1) * pageSize).Take(pageSize);
+		return source.Skip((int)offset).Take(size);
+	}
+
+	private (int Page, int PageSize, long Offset) GetPage(int page, int pageSize)
+	{
+		page = Math.Max(1, page);
+		pageSize = pageSize > 0 ? pageSize : _options.DefaultPageSize;
+		if (_options.MaxPageSize != -1)
+			pageSize = Math.Min(pageSize, _options.MaxPageSize);
+		return (page, pageSize, (long)(page - 1) * pageSize);
 	}
 
 	/// <summary>
@@ -180,16 +202,27 @@ public class CalaisProcessor
 		source = ApplyFilters(source, query);
 		source = ApplySorting(source, query);
 
+		if (IsUnpaged(query))
+		{
+			var allItems = await source.ToListAsync(cancellationToken);
+			return new PagedResult<TEntity>
+			{
+				Items = allItems,
+				Page = 1,
+				PageSize = allItems.Count,
+				TotalCount = allItems.Count,
+			};
+		}
+
+		var (page, pageSize, offset) = GetPage(
+			query.Page.GetValueOrDefault(),
+			query.PageSize.GetValueOrDefault()
+		);
 		var totalCount = await source.CountAsync(cancellationToken);
-
-		var page = query.Page ?? 1;
-		var pageSize = Math.Min(query.PageSize ?? _options.DefaultPageSize, _options.MaxPageSize);
-		if (page < 1)
-			page = 1;
-		if (pageSize < 1)
-			pageSize = _options.DefaultPageSize;
-
-		var items = await ApplyPagination(source, page, pageSize).ToListAsync(cancellationToken);
+		var items =
+			offset < totalCount
+				? await source.Skip((int)offset).Take(pageSize).ToListAsync(cancellationToken)
+				: [];
 
 		return new PagedResult<TEntity>
 		{

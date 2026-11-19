@@ -11,12 +11,30 @@ public class CalaisOptions
 	/// <summary>
 	/// Default page size when not specified in query
 	/// </summary>
-	public int DefaultPageSize { get; set; } = 10;
+	public int DefaultPageSize
+	{
+		get;
+		set
+		{
+			ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+			field = value;
+		}
+	} = 10;
 
 	/// <summary>
 	/// Maximum allowed page size
 	/// </summary>
-	public int MaxPageSize { get; set; } = 100;
+	/// <remarks>With -1, explicit sizes are uncapped and omitting the size returns all matches</remarks>
+	public int MaxPageSize
+	{
+		get;
+		set
+		{
+			if (value != -1)
+				ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+			field = value;
+		}
+	} = 100;
 
 	/// <summary>
 	/// Default language for full-text search vectors

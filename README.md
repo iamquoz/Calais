@@ -45,7 +45,9 @@ var processor = new CalaisBuilder()
 
 If you want to use the processor with dependency injection, see the [Dependency Injection](#dependency-injection) section below.
 
-> Note: Default page size and max page size are set to 10 and 100 respectively. If you want to remove pagination limits, call `WithMaxPageSize(int.MaxValue)`/`WithDefaultPageSize(int.MaxValue)`.
+The default page size is 10 and the maximum is 100. With `WithMaxPageSize(-1)`, the client can request any positive `PageSize` and use `Page` normally. Omitting `PageSize` in this mode returns all matching rows in the requested order, even if `Page` is supplied. For this unpaged result, `ApplyAsync` reports `Page = 1` and sets both `PageSize` and `TotalCount` to the number of items returned, including zero for an empty result.
+
+`DefaultPageSize` must be positive. An explicitly nonpositive request size uses the default. With a positive maximum, a missing size also uses the default and all page sizes are capped at the maximum. `ApplyPagination` throws `ArgumentOutOfRangeException` if the offset exceeds `int.MaxValue`, the limit of `Queryable.Skip`. `ApplyAsync` returns an empty page with the exact total when the offset is at or beyond the count.
 
 ### 2. Create a query
 

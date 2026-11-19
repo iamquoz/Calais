@@ -11,6 +11,48 @@ using Xunit;
 
 namespace Calais.Tests;
 
+public class CollectionLengthTranslationTests
+{
+	[Theory]
+	[InlineData("len>", "0", "EXISTS", 1, 2)]
+	[InlineData("len>=", "1", "EXISTS", 1, 2)]
+	[InlineData("len>", "1", "count(*)", 2)]
+	[InlineData("len==", "2", "count(*)", 2)]
+	public void CollectionLength_PreservesMatchesAndUsesExistenceForPositiveBounds(
+		string op,
+		string threshold,
+		string sqlFragment,
+		params int[] expectedAges
+	)
+	{
+		using var db = new TestDbContext(
+			new DbContextOptionsBuilder<TestDbContext>().UseNpgsql().Options
+		);
+		var processor = new CalaisBuilder().Build();
+		var query = new CalaisQuery
+		{
+			Filters =
+			[
+				new()
+				{
+					Field = "comments",
+					Operator = op,
+					Values = [threshold],
+				},
+			],
+		};
+
+		processor.ApplyFilters(db.Users, query).ToQueryString().Should().Contain(sqlFragment);
+		var users = new User[]
+		{
+			new() { Age = 0 },
+			new() { Age = 1, Comments = [new()] },
+			new() { Age = 2, Comments = [new(), new()] },
+		}.AsQueryable();
+		processor.ApplyFilters(users, query).Select(u => u.Age).Should().Equal(expectedAges);
+	}
+}
+
 [Collection("PostgreSql")]
 public class LengthOperatorTests
 {
